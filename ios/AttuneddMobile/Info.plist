@@ -55,5 +55,18 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<false/>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Attunedd reads your workout and heart rate data to track training stress and recovery.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>processing</string>
+		<string>remote-notification</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.attunedd.daily-evaluation</string>
+		<string>com.transistorsoft.fetch</string>
+	</array>
 </dict>
 </plist>
