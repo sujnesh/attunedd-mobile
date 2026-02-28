@@ -7,8 +7,8 @@ import {
 } from './eventQueue';
 import { applyAuthoritativeState } from './reconciliation';
 import { EVENT_TYPES } from './eventTypes';
+import { API_BASE_URL } from '../config';
 
-const API_BASE_URL = __DEV__ ? 'http://localhost:3000' : 'https://attunedd.com';
 const EVENTS_ENDPOINT = `${API_BASE_URL}/api/mobile/events`;
 
 export interface FlushResult {

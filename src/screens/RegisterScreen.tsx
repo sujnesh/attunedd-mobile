@@ -11,8 +11,7 @@ import {
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { AuthStackParamList } from '../navigation/types';
 import { setMeta } from '../services/metaStateService';
-
-const API_BASE_URL = __DEV__ ? 'http://localhost:3000' : 'https://attunedd.com';
+import { API_BASE_URL } from '../config';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Register'>;
 
