@@ -1,7 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
-  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -17,6 +16,7 @@ import { useActiveWorkout } from '../../workout/controller/useActiveWorkout';
 import type { Deviation } from '../../workout/core/deviationEngine';
 import type { SessionSet } from '../../workout/core/sessionState';
 import type { FreeFormWorkoutProps } from '../../navigation/types';
+import { useSessionTimer } from '../../workout/hooks/useSessionTimer';
 
 const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
 
@@ -32,9 +32,12 @@ export default function FreeFormWorkoutScreen({ route, navigation }: FreeFormWor
     initSession,
     submitSet,
     confirmOverride,
+    undoLastSet,
     finishSession,
   } = useActiveWorkout();
 
+  const inputRef = useRef<TextInput>(null);
+  const timer = useSessionTimer(session?.startedAt ?? null);
   const [input, setInput] = useState('');
   const [deviation, setDeviation] = useState<Deviation | null>(null);
   const [pendingParsed, setPendingParsed] = useState<{
@@ -62,7 +65,6 @@ export default function FreeFormWorkoutScreen({ route, navigation }: FreeFormWor
     setInput('');
     setDeviation(null);
     setPendingParsed(null);
-    Keyboard.dismiss();
   };
 
   const handleOverride = async () => {
@@ -77,7 +79,6 @@ export default function FreeFormWorkoutScreen({ route, navigation }: FreeFormWor
     setInput('');
     setDeviation(null);
     setPendingParsed(null);
-    Keyboard.dismiss();
   };
 
   const handleDismiss = () => {
@@ -126,7 +127,10 @@ export default function FreeFormWorkoutScreen({ route, navigation }: FreeFormWor
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={0}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>FREE FORM</Text>
+        <View style={styles.headerTitleRow}>
+          <Text style={styles.headerTitle}>FREE FORM</Text>
+          <Text style={styles.timerText}>{timer}</Text>
+        </View>
         <View style={styles.stressRow}>
           <Text style={styles.stressValue}>
             {Math.round(session.cumulativeStress)}
@@ -197,6 +201,7 @@ export default function FreeFormWorkoutScreen({ route, navigation }: FreeFormWor
 
       <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, 8) }]}>
         <TextInput
+          ref={inputRef}
           style={styles.input}
           value={input}
           onChangeText={setInput}
@@ -204,9 +209,15 @@ export default function FreeFormWorkoutScreen({ route, navigation }: FreeFormWor
           placeholderTextColor="#444444"
           autoCapitalize="none"
           autoCorrect={false}
+          autoFocus
           returnKeyType="send"
           onSubmitEditing={handleSubmit}
         />
+        {session.sets.length > 0 && (
+          <Pressable onPress={undoLastSet} style={styles.undoBtn}>
+            <Text style={styles.undoText}>UNDO</Text>
+          </Pressable>
+        )}
         <Pressable onPress={handleSubmit} style={styles.sendBtn}>
           <Text style={styles.sendText}>LOG</Text>
         </Pressable>
@@ -244,13 +255,24 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0.5,
     borderBottomColor: '#222222',
   },
+  headerTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 8,
+  },
   headerTitle: {
     color: '#555555',
     fontSize: 11,
     fontWeight: '600',
     letterSpacing: 3,
-    marginBottom: 8,
     textAlign: 'center',
+  },
+  timerText: {
+    color: '#555555',
+    fontSize: 11,
+    fontFamily: MONO,
   },
   stressRow: {
     flexDirection: 'row',
@@ -430,6 +452,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#151515',
     borderWidth: 0.5,
     borderColor: '#333333',
+  },
+  undoBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+  },
+  undoText: {
+    color: '#888888',
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 1,
   },
   sendBtn: {
     paddingVertical: 10,

@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export const CREATE_WORKOUT_LOGS = `
   CREATE TABLE IF NOT EXISTS workout_logs (
@@ -95,6 +95,19 @@ export const CREATE_META_STATE = `
   );
 `;
 
+export const CREATE_SESSION_DRAFTS = `
+  CREATE TABLE IF NOT EXISTS session_drafts (
+    local_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    mode TEXT NOT NULL,
+    mobile_local_id TEXT NOT NULL,
+    caps_json TEXT NOT NULL,
+    state_json TEXT NOT NULL,
+    override_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+`;
+
 export const CREATE_INDEXES = [
   'CREATE INDEX IF NOT EXISTS idx_workout_logs_server_id ON workout_logs(server_id);',
   'CREATE INDEX IF NOT EXISTS idx_workout_logs_mobile_local_id ON workout_logs(mobile_local_id);',
@@ -113,4 +126,5 @@ export const ALL_TABLES = [
   CREATE_POLICY_SNAPSHOTS,
   CREATE_SYNC_QUEUE,
   CREATE_META_STATE,
+  CREATE_SESSION_DRAFTS,
 ];

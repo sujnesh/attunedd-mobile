@@ -11,6 +11,7 @@ import { detectPlannedFatigue, detectFreeFormFatigue } from '../../engine/fatigu
 import {
   initializeSession,
   addSet,
+  removeLastSet,
   getRecentSetsForExercise,
   serialize,
   deserialize,
@@ -58,6 +59,7 @@ export interface UseActiveWorkoutReturn {
     rpe: number,
     deviation: Deviation,
   ) => Promise<void>;
+  undoLastSet: () => Promise<void>;
   finishSession: () => Promise<DebriefData | null>;
 }
 
@@ -235,6 +237,14 @@ export function useActiveWorkout(): UseActiveWorkoutReturn {
     await applySet(session, newOverrides, exerciseName, weight, reps, rpe, true);
   }, [session, overrides, applySet]);
 
+  const undoLastSet = useCallback(async () => {
+    if (!session || session.sets.length === 0) return;
+    const updated = removeLastSet(session);
+    setSession(updated);
+    setNudge(evaluateNudge(updated));
+    await persistDraft(updated, overrides);
+  }, [session, overrides, persistDraft]);
+
   const finishSession = useCallback(async (): Promise<DebriefData | null> => {
     if (!session || finishing) return null;
     setFinishing(true);
@@ -372,6 +382,7 @@ export function useActiveWorkout(): UseActiveWorkoutReturn {
     initSession,
     submitSet,
     confirmOverride,
+    undoLastSet,
     finishSession,
   };
 }

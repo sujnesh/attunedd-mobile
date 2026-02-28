@@ -1,5 +1,5 @@
 import type { SQLiteDatabase } from 'react-native-sqlite-storage';
-import { ALL_TABLES, CREATE_INDEXES, SCHEMA_VERSION } from './schema';
+import { ALL_TABLES, CREATE_INDEXES, CREATE_SESSION_DRAFTS, SCHEMA_VERSION } from './schema';
 
 export async function runMigrations(db: SQLiteDatabase): Promise<void> {
   const currentVersion = await getSchemaVersion(db);
@@ -39,6 +39,10 @@ export async function runMigrations(db: SQLiteDatabase): Promise<void> {
 
   if (currentVersion < 3) {
     await migrateV2toV3(db);
+  }
+
+  if (currentVersion < 4) {
+    await migrateV3toV4(db);
   }
 }
 
@@ -98,6 +102,22 @@ async function migrateV2toV3(db: SQLiteDatabase): Promise<void> {
     await db.executeSql(
       `INSERT OR REPLACE INTO meta_state (key, value) VALUES ('schema_version', ?);`,
       [String(3)]
+    );
+    await db.executeSql('COMMIT;');
+  } catch (e) {
+    await db.executeSql('ROLLBACK;');
+    throw e;
+  }
+}
+
+async function migrateV3toV4(db: SQLiteDatabase): Promise<void> {
+  await db.executeSql('BEGIN TRANSACTION;');
+  try {
+    await db.executeSql(CREATE_SESSION_DRAFTS);
+
+    await db.executeSql(
+      `INSERT OR REPLACE INTO meta_state (key, value) VALUES ('schema_version', ?);`,
+      [String(4)]
     );
     await db.executeSql('COMMIT;');
   } catch (e) {
