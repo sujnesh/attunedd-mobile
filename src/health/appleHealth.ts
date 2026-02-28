@@ -1,6 +1,6 @@
 import AppleHealthKit, {
   type HealthInputOptions,
-  type HealthActivitySummary,
+  type HealthValue,
 } from 'react-native-health';
 import type { RawActivity } from './types';
 
@@ -32,29 +32,31 @@ export async function fetchRecentRuns(
 
   const options: HealthInputOptions = {
     startDate,
-    type: 'Running',
   };
 
   const samples = await getSamples(options);
   const activities: RawActivity[] = [];
 
   for (const sample of samples) {
-    const startMs = new Date(sample.start).getTime();
-    const endMs = new Date(sample.end).getTime();
+    const startMs = new Date((sample as any).start ?? sample.startDate).getTime();
+    const endMs = new Date((sample as any).end ?? sample.endDate).getTime();
     const durationMinutes = (endMs - startMs) / 60000;
 
     if (durationMinutes <= 0) continue;
 
-    const avgHr = await getAverageHeartRate(sample.start, sample.end);
+    const avgHr = await getAverageHeartRate(
+      (sample as any).start ?? sample.startDate,
+      (sample as any).end ?? sample.endDate
+    );
 
     activities.push({
       source: 'apple',
       start_time: startMs,
       duration_minutes: durationMinutes,
-      distance_m: sample.distance ? sample.distance * 1000 : null,
+      distance_m: (sample as any).distance ? (sample as any).distance * 1000 : null,
       avg_hr: avgHr,
       max_hr: null,
-      calories: sample.calories ?? null,
+      calories: (sample as any).calories ?? null,
       activity_type: 'running',
       raw_json: JSON.stringify(sample),
     });
@@ -65,9 +67,9 @@ export async function fetchRecentRuns(
 
 function getSamples(
   options: HealthInputOptions
-): Promise<HealthActivitySummary[]> {
+): Promise<HealthValue[]> {
   return new Promise((resolve, reject) => {
-    AppleHealthKit.getSamples(options, (err: string, results: HealthActivitySummary[]) => {
+    AppleHealthKit.getSamples(options, (err: string, results: HealthValue[]) => {
       if (err) {
         reject(new Error(err));
         return;

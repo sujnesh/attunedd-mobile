@@ -5,38 +5,37 @@ export async function applyAuthoritativeState(
   state: AuthoritativeState,
   mobileLocalId: string | null
 ): Promise<void> {
-  const db = await (await import('../db/database')).getDatabase();
+  const wl = state.workout_log;
+  const now = nowISO();
 
-  await db.transaction(async (tx) => {
-    const wl = state.workout_log;
-    const now = nowISO();
+  // Find local workout by server_id or mobile_local_id
+  let workoutLocalId: number | null = null;
 
-    // Find local workout by server_id or mobile_local_id
-    let workoutLocalId: number | null = null;
-
-    if (wl.server_id) {
-      const [existing] = await tx.executeSql(
-        `SELECT local_id FROM workout_logs WHERE server_id = ? LIMIT 1;`,
-        [wl.server_id]
-      );
-      if (existing.rows.length > 0) {
-        workoutLocalId = existing.rows.item(0).local_id;
-      }
+  if (wl.server_id) {
+    const [existing] = await executeSql(
+      `SELECT local_id FROM workout_logs WHERE server_id = ? LIMIT 1;`,
+      [wl.server_id]
+    );
+    if (existing.rows.length > 0) {
+      workoutLocalId = existing.rows.item(0).local_id;
     }
+  }
 
-    if (workoutLocalId === null && mobileLocalId) {
-      const [existing] = await tx.executeSql(
-        `SELECT local_id FROM workout_logs WHERE mobile_local_id = ? LIMIT 1;`,
-        [mobileLocalId]
-      );
-      if (existing.rows.length > 0) {
-        workoutLocalId = existing.rows.item(0).local_id;
-      }
+  if (workoutLocalId === null && mobileLocalId) {
+    const [existing] = await executeSql(
+      `SELECT local_id FROM workout_logs WHERE mobile_local_id = ? LIMIT 1;`,
+      [mobileLocalId]
+    );
+    if (existing.rows.length > 0) {
+      workoutLocalId = existing.rows.item(0).local_id;
     }
+  }
 
+  await executeSql('BEGIN TRANSACTION;');
+  try {
     if (workoutLocalId !== null) {
       // Replace existing workout_log
-      await tx.executeSql(
+      await executeSql(
         `UPDATE workout_logs SET
            server_id = ?,
            status = ?,
@@ -69,7 +68,7 @@ export async function applyAuthoritativeState(
       );
     } else {
       // Insert new workout_log
-      const [insertResult] = await tx.executeSql(
+      const [insertResult] = await executeSql(
         `INSERT INTO workout_logs
            (server_id, status, actual_stress, allowed_stress, planned_stress,
             capacity_score, coaching_mode, override_flag, started_at,
@@ -91,17 +90,17 @@ export async function applyAuthoritativeState(
           now,
         ]
       );
-      workoutLocalId = insertResult.insertId;
+      workoutLocalId = insertResult.insertId ?? null;
     }
 
     // Replace exercise_sets: delete all, re-insert from server
-    await tx.executeSql(
+    await executeSql(
       `DELETE FROM exercise_sets WHERE workout_log_local_id = ?;`,
       [workoutLocalId]
     );
 
     for (const set of state.exercise_sets) {
-      await tx.executeSql(
+      await executeSql(
         `INSERT INTO exercise_sets
            (server_id, workout_log_local_id, exercise_name, set_number,
             weight, reps, rpe, stress_units, muscle_group,
@@ -126,13 +125,13 @@ export async function applyAuthoritativeState(
     }
 
     // Replace policy_snapshot: delete existing, insert fresh
-    await tx.executeSql(
+    await executeSql(
       `DELETE FROM policy_snapshots WHERE workout_log_local_id = ?;`,
       [workoutLocalId]
     );
 
     const ps = state.policy_snapshot;
-    await tx.executeSql(
+    await executeSql(
       `INSERT INTO policy_snapshots
          (workout_log_local_id, projected_adaptation_score, risk_band,
           policy_caps, policy_reasons, updated_at, created_at)
@@ -147,5 +146,10 @@ export async function applyAuthoritativeState(
         now,
       ]
     );
-  });
+
+    await executeSql('COMMIT;');
+  } catch (e) {
+    await executeSql('ROLLBACK;');
+    throw e;
+  }
 }

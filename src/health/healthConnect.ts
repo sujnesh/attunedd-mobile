@@ -30,10 +30,11 @@ export async function fetchRecentRuns(
   ).toISOString();
   const endTime = new Date().toISOString();
 
-  const sessions = await readRecords('ExerciseSession', {
+  const result = await readRecords('ExerciseSession', {
     timeRangeFilter: { operator: 'between', startTime, endTime },
   });
 
+  const sessions = (result as any).records ?? result;
   const activities: RawActivity[] = [];
 
   for (const session of sessions) {
@@ -72,11 +73,12 @@ async function getAverageHeartRate(
   endTime: string
 ): Promise<number | null> {
   try {
-    const records = await readRecords('HeartRate', {
+    const result = await readRecords('HeartRate', {
       timeRangeFilter: { operator: 'between', startTime, endTime },
     });
 
-    if (records.length === 0) return null;
+    const records = (result as any).records ?? result;
+    if (!records || records.length === 0) return null;
 
     let total = 0;
     let count = 0;
@@ -98,11 +100,12 @@ async function getTotalDistance(
   endTime: string
 ): Promise<number | null> {
   try {
-    const records = await readRecords('Distance', {
+    const result = await readRecords('Distance', {
       timeRangeFilter: { operator: 'between', startTime, endTime },
     });
 
-    if (records.length === 0) return null;
+    const records = (result as any).records ?? result;
+    if (!records || records.length === 0) return null;
 
     let totalM = 0;
     for (const record of records) {
