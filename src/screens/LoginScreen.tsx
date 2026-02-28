@@ -28,11 +28,11 @@ export default function LoginScreen({ navigation }: Props) {
 
     setLoading(true);
     try {
-      const body = await api<{ api_token: string; has_preferences?: boolean }>(
+      const body = await api<{ api_token: string; token_expires_at: string; has_preferences?: boolean }>(
         '/api/auth/login',
         { method: 'POST', body: { email: email.trim(), password }, skipAuth: true },
       );
-      await login(body.api_token, body.has_preferences ?? false);
+      await login(body.api_token, body.has_preferences ?? false, body.token_expires_at);
     } catch (err) {
       if (err instanceof ApiError) {
         const msg = (err.body as { error?: string })?.error ?? 'Invalid credentials';

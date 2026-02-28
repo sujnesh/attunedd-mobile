@@ -20,13 +20,47 @@ interface RequestOptions {
   skipAuth?: boolean;
 }
 
-/**
- * Shared API client — centralized fetch with auth token injection.
- *
- * Usage:
- *   const data = await api('/api/coaching/projections');
- *   const data = await api('/api/auth/login', { method: 'POST', body: { email, password }, skipAuth: true });
- */
+const REFRESH_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 1 day before expiry
+let refreshing: Promise<void> | null = null;
+
+async function refreshTokenIfNeeded(): Promise<void> {
+  const expiresAt = await getMeta('token_expires_at');
+  if (!expiresAt) return;
+
+  const expiresMs = new Date(expiresAt).getTime();
+  if (expiresMs - Date.now() > REFRESH_THRESHOLD_MS) return;
+
+  // Already refreshing — wait for it
+  if (refreshing) return refreshing;
+
+  refreshing = (async () => {
+    try {
+      const token = await getMeta('auth_token');
+      if (!token) return;
+
+      const res = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (res.ok) {
+        const body = await res.json();
+        await setMeta('auth_token', body.api_token);
+        await setMeta('token_expires_at', body.token_expires_at);
+      }
+    } catch {
+      // Non-fatal — will retry on next request
+    } finally {
+      refreshing = null;
+    }
+  })();
+
+  return refreshing;
+}
+
 export async function api<T = unknown>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, headers = {}, skipAuth = false } = options;
 
@@ -36,6 +70,7 @@ export async function api<T = unknown>(path: string, options: RequestOptions = {
   };
 
   if (!skipAuth) {
+    await refreshTokenIfNeeded();
     const token = await getMeta('auth_token');
     if (token) {
       finalHeaders['Authorization'] = `Bearer ${token}`;

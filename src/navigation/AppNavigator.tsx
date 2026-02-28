@@ -110,9 +110,12 @@ export default function AppNavigator() {
   );
 }
 
-export async function login(token: string, hasPreferences: boolean) {
+export async function login(token: string, hasPreferences: boolean, tokenExpiresAt?: string) {
   await setMeta('auth_token', token);
   await setMeta('has_preferences', hasPreferences ? 'true' : 'false');
+  if (tokenExpiresAt) {
+    await setMeta('token_expires_at', tokenExpiresAt);
+  }
   emitAuthChange(token);
 }
 
@@ -130,5 +133,6 @@ export async function logout() {
   }
   await setMeta('auth_token', '');
   await setMeta('has_preferences', 'false');
+  await setMeta('token_expires_at', '');
   emitAuthChange(null);
 }

@@ -34,7 +34,7 @@ export default function RegisterScreen({ navigation }: Props) {
 
     setLoading(true);
     try {
-      const body = await api<{ api_token: string; has_preferences?: boolean }>(
+      const body = await api<{ api_token: string; token_expires_at: string; has_preferences?: boolean }>(
         '/api/auth/register',
         {
           method: 'POST',
@@ -42,7 +42,7 @@ export default function RegisterScreen({ navigation }: Props) {
           skipAuth: true,
         },
       );
-      await login(body.api_token, body.has_preferences ?? false);
+      await login(body.api_token, body.has_preferences ?? false, body.token_expires_at);
     } catch (err) {
       if (err instanceof ApiError) {
         const parsed = err.body as { errors?: string[] } | null;
