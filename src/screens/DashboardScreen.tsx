@@ -8,12 +8,15 @@ import {
   type ReadinessState,
 } from '../services/readinessService';
 import type { ParsedCaps } from '../services/metaStateService';
+import { getMeta } from '../services/metaStateService';
 import {
   buildExplanation,
   type ExplanationOutput,
   type PenaltyRow,
   type LimitRow,
 } from '../services/explanationEngine';
+import { API_BASE_URL } from '../config';
+import type { ProjectionDay, HeavySessionSimulation, ProjectionsResponse } from '../types/api';
 
 const BAND_COLORS: Record<string, string> = {
   green: '#2ECC71',
@@ -55,6 +58,8 @@ export default function DashboardScreen() {
   const [state, setState] = useState<ReadinessState | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [projections, setProjections] = useState<ProjectionDay[]>([]);
+  const [heavySim, setHeavySim] = useState<HeavySessionSimulation | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -64,8 +69,33 @@ export default function DashboardScreen() {
           setLoaded(true);
         })
         .catch(() => setLoaded(true));
+
+      fetchProjections();
     }, [])
   );
+
+  const fetchProjections = useCallback(async () => {
+    try {
+      const token = await getMeta('auth_token');
+      if (!token) return;
+
+      const res = await fetch(`${API_BASE_URL}/api/coaching/projections`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (res.ok) {
+        const body: ProjectionsResponse = await res.json();
+        setProjections(body.projections);
+        setHeavySim(body.heavy_session_simulation);
+      }
+    } catch {
+      // projection fetch failure is non-fatal
+    }
+  }, []);
 
   const handleRefresh = useCallback(async () => {
     if (refreshing) return;
@@ -133,6 +163,10 @@ export default function DashboardScreen() {
       ) : null}
 
       <SessionLimitsSection limits={explanation.sessionLimits} />
+
+      {projections.length > 0 && (
+        <ProjectionsSection projections={projections} heavySim={heavySim} />
+      )}
 
       <Text style={styles.timestamp}>{formatTimestamp(data.timestamp)}</Text>
 
@@ -207,6 +241,71 @@ function SessionLimitsSection({ limits }: { limits: LimitRow[] }) {
           </Text>
         </View>
       ))}
+    </View>
+  );
+}
+
+const MODE_COLORS: Record<string, string> = {
+  push: '#2ECC71',
+  maintain: '#888888',
+  fatigue_management: '#F1C40F',
+};
+
+function formatProjectionDate(iso: string): string {
+  const d = new Date(iso + 'T00:00:00');
+  const days = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+  const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+  return `${days[d.getDay()]} ${months[d.getMonth()]} ${d.getDate()}`;
+}
+
+function formatSessionType(type: string): string {
+  return type.replace(/_/g, ' ').toUpperCase();
+}
+
+function ProjectionsSection({
+  projections,
+  heavySim,
+}: {
+  projections: ProjectionDay[];
+  heavySim: HeavySessionSimulation | null;
+}) {
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionHeader}>NEXT 2 DAYS</Text>
+      {projections.map((p) => (
+        <View key={p.date} style={styles.projectionDay}>
+          <View style={styles.projectionHeader}>
+            <Text style={styles.projectionDate}>{formatProjectionDate(p.date)}</Text>
+            <Text style={[styles.projectionMode, { color: MODE_COLORS[p.coaching_mode] ?? '#888888' }]}>
+              {p.coaching_mode.replace(/_/g, ' ').toUpperCase()}
+            </Text>
+          </View>
+          <Text style={styles.projectionType}>
+            {formatSessionType(p.session_type)}
+          </Text>
+          {p.rest_reason ? (
+            <Text style={styles.projectionRest}>{p.rest_reason}</Text>
+          ) : p.primary_muscles.length > 0 ? (
+            <Text style={styles.projectionMuscles}>
+              {p.primary_muscles.map((m) => m.replace(/_/g, ' ')).join(', ')}
+            </Text>
+          ) : null}
+        </View>
+      ))}
+      {heavySim && (
+        <View style={styles.simBlock}>
+          <Text style={styles.simLabel}>HEAVY SESSION IMPACT</Text>
+          <View style={styles.simRow}>
+            <Text style={styles.simMetric}>STRAIN RATIO</Text>
+            <Text style={styles.simValue}>
+              {heavySim.current_strain_ratio} → {heavySim.projected_strain_ratio}
+            </Text>
+          </View>
+          {heavySim.warning && (
+            <Text style={styles.simWarning}>{heavySim.warning}</Text>
+          )}
+        </View>
+      )}
     </View>
   );
 }
@@ -382,5 +481,75 @@ const styles = StyleSheet.create({
   },
   refreshing: {
     color: '#333333',
+  },
+  projectionDay: {
+    marginBottom: 16,
+  },
+  projectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  projectionDate: {
+    color: '#EAEAEA',
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 2,
+  },
+  projectionMode: {
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 1,
+  },
+  projectionType: {
+    color: '#CCCCCC',
+    fontSize: 13,
+    fontFamily: MONO,
+    marginBottom: 2,
+  },
+  projectionRest: {
+    color: '#888888',
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  projectionMuscles: {
+    color: '#555555',
+    fontSize: 11,
+    letterSpacing: 1,
+  },
+  simBlock: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#222222',
+    paddingTop: 12,
+    marginTop: 4,
+  },
+  simLabel: {
+    color: '#555555',
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 2,
+    marginBottom: 8,
+  },
+  simRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  simMetric: {
+    color: '#888888',
+    fontSize: 11,
+    fontWeight: '500',
+    letterSpacing: 1,
+  },
+  simValue: {
+    color: '#EAEAEA',
+    fontSize: 12,
+    fontFamily: MONO,
+  },
+  simWarning: {
+    color: '#F1C40F',
+    fontSize: 11,
+    marginTop: 6,
   },
 });

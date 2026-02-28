@@ -71,6 +71,26 @@ export interface DebriefData {
   summary_line: string;
 }
 
+export interface ProjectionDay {
+  date: string;
+  session_type: string;
+  coaching_mode: string;
+  primary_muscles: string[];
+  rest_reason: string | null;
+}
+
+export interface HeavySessionSimulation {
+  current_strain_ratio: number;
+  projected_strain_ratio: number;
+  heavy_asu: number;
+  warning: string | null;
+}
+
+export interface ProjectionsResponse {
+  projections: ProjectionDay[];
+  heavy_session_simulation: HeavySessionSimulation | null;
+}
+
 export interface SyncResponse {
   status: 'accepted' | 'rejected' | 'stale_client' | 'error';
   authoritative_state: AuthoritativeState;
