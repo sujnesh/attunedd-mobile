@@ -2,6 +2,7 @@ import { AppState, type NativeEventSubscription } from 'react-native';
 import { registerScheduler, executeBackgroundTask } from './scheduler';
 import { runEvaluation } from './evaluationEngine';
 import { configureNotifications } from './notificationPolicy';
+import { getDatabase } from '../db/database';
 
 let initialized = false;
 let appStateSubscription: NativeEventSubscription | null = null;
@@ -9,6 +10,9 @@ let appStateSubscription: NativeEventSubscription | null = null;
 export async function initializeBackgroundSystem(): Promise<void> {
   if (initialized) return;
   initialized = true;
+
+  // Ensure database and schema are ready before any queries
+  await getDatabase();
 
   configureNotifications();
   await registerScheduler();

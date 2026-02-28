@@ -7,24 +7,34 @@ const DB_NAME = 'attunedd.db';
 const DB_LOCATION = 'default';
 
 let dbInstance: SQLiteDatabase | null = null;
+let dbInitPromise: Promise<SQLiteDatabase> | null = null;
 
 export async function getDatabase(): Promise<SQLiteDatabase> {
   if (dbInstance) {
     return dbInstance;
   }
 
-  const db = await SQLite.openDatabase({
-    name: DB_NAME,
-    location: DB_LOCATION,
-  });
+  // Prevent concurrent initialization race
+  if (dbInitPromise) {
+    return dbInitPromise;
+  }
 
-  await db.executeSql('PRAGMA journal_mode = WAL;');
-  await db.executeSql('PRAGMA foreign_keys = ON;');
+  dbInitPromise = (async () => {
+    const db = await SQLite.openDatabase({
+      name: DB_NAME,
+      location: DB_LOCATION,
+    });
 
-  await runMigrations(db);
+    await db.executeSql('PRAGMA journal_mode = WAL;');
+    await db.executeSql('PRAGMA foreign_keys = ON;');
 
-  dbInstance = db;
-  return db;
+    await runMigrations(db);
+
+    dbInstance = db;
+    return db;
+  })();
+
+  return dbInitPromise;
 }
 
 export async function closeDatabase(): Promise<void> {
