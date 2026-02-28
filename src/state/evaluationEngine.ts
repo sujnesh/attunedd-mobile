@@ -60,9 +60,9 @@ async function computeCurrentState(): Promise<EvaluationSnapshot> {
   const adaptationScore = Math.round(capacityComponent + strainComponent);
 
   let riskBand: string;
-  if (adaptationScore >= 70) {
+  if (adaptationScore >= 85) {
     riskBand = 'green';
-  } else if (adaptationScore >= 40) {
+  } else if (adaptationScore >= 70) {
     riskBand = 'yellow';
   } else {
     riskBand = 'red';
@@ -139,10 +139,12 @@ async function getLatestCapacity(): Promise<number> {
 export function deriveCaps(riskBand: string): PolicyCaps {
   switch (riskBand) {
     case 'red':
-      return { max_rpe: 7, max_allowed_stress_pct: 70, block_heavy_neural: true, max_cardio_zone: 3 };
+    case 'high_risk':
+      return { max_rpe: 7, max_allowed_stress_pct: 60, block_heavy_neural: true, max_cardio_zone: 3 };
     case 'yellow':
-      return { max_rpe: 8, max_allowed_stress_pct: 85, block_heavy_neural: false, max_cardio_zone: 4 };
-    default:
+    case 'suboptimal':
+      return { max_rpe: 8, max_allowed_stress_pct: 85, block_heavy_neural: false, max_cardio_zone: 5 };
+    default: // green, optimal
       return { max_rpe: 10, max_allowed_stress_pct: 100, block_heavy_neural: false, max_cardio_zone: 5 };
   }
 }

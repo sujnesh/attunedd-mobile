@@ -171,6 +171,14 @@ export async function applyAuthoritativeState(
       ['last_risk_band', ps.risk_band]
     );
 
+    // Persist coaching data for dashboard headline/nudges
+    if (state.coaching) {
+      await executeSql(
+        `INSERT OR REPLACE INTO meta_state (key, value) VALUES (?, ?);`,
+        ['last_coaching_json', JSON.stringify(state.coaching)]
+      );
+    }
+
     await executeSql('COMMIT;');
   } catch (e) {
     await executeSql('ROLLBACK;');

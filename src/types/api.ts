@@ -42,10 +42,19 @@ export interface AuthoritativePolicySnapshot {
   raw_metrics?: Record<string, unknown>;
 }
 
+export interface CoachingData {
+  headline: string;
+  tone: string;
+  primary_factor: string | null;
+  nudges: string[];
+  positive_notes: string[];
+}
+
 export interface AuthoritativeState {
   workout_log: AuthoritativeWorkoutLog;
   exercise_sets: AuthoritativeExerciseSet[];
   policy_snapshot: AuthoritativePolicySnapshot;
+  coaching?: CoachingData;
 }
 
 export interface SyncResponse {

@@ -19,12 +19,25 @@ const BAND_COLORS: Record<string, string> = {
   green: '#2ECC71',
   yellow: '#F1C40F',
   red: '#E74C3C',
+  optimal: '#2ECC71',
+  suboptimal: '#F1C40F',
+  high_risk: '#E74C3C',
+};
+
+const TONE_COLORS: Record<string, string> = {
+  encouraging: '#2ECC71',
+  cautionary: '#F1C40F',
+  protective: '#E74C3C',
+  neutral: '#888888',
 };
 
 const BAND_LABELS: Record<string, string> = {
   green: 'OPTIMAL',
   yellow: 'SUBOPTIMAL',
   red: 'HIGH RISK',
+  optimal: 'OPTIMAL',
+  suboptimal: 'SUBOPTIMAL',
+  high_risk: 'HIGH RISK',
 };
 
 function formatTimestamp(ts: number | null): string {
@@ -79,7 +92,10 @@ export default function DashboardScreen() {
     );
   }
 
-  const accent = BAND_COLORS[data.band] ?? '#888888';
+  const coaching = data.coaching;
+  const accent = coaching?.tone
+    ? (TONE_COLORS[coaching.tone] ?? BAND_COLORS[data.band] ?? '#888888')
+    : (BAND_COLORS[data.band] ?? '#888888');
   const bandLabel = BAND_LABELS[data.band] ?? data.band.toUpperCase();
 
   const explanation = buildExplanation({
@@ -90,6 +106,9 @@ export default function DashboardScreen() {
     caps: data.caps,
   });
 
+  // Use server coaching headline when available, fall back to local explanation
+  const headline = coaching?.headline ?? explanation.decisionLine;
+
   return (
     <ScrollView
       style={styles.scrollRoot}
@@ -97,7 +116,15 @@ export default function DashboardScreen() {
     >
       <Text style={[styles.score, { color: accent }]}>{data.score}</Text>
       <Text style={[styles.bandLabel, { color: accent }]}>{bandLabel}</Text>
-      <Text style={styles.decisionLine}>{explanation.decisionLine}</Text>
+      <Text style={styles.decisionLine}>{headline}</Text>
+
+      {coaching?.nudges && coaching.nudges.length > 0 ? (
+        <NudgesSection nudges={coaching.nudges} />
+      ) : null}
+
+      {coaching?.positive_notes && coaching.positive_notes.length > 0 ? (
+        <PositiveNotesSection notes={coaching.positive_notes} />
+      ) : null}
 
       {explanation.hasServerData ? (
         <WhyTodaySection explanation={explanation} score={data.score} />
@@ -118,6 +145,26 @@ export default function DashboardScreen() {
         </Text>
       </Pressable>
     </ScrollView>
+  );
+}
+
+function NudgesSection({ nudges }: { nudges: string[] }) {
+  return (
+    <View style={styles.nudgesContainer}>
+      {nudges.map((nudge, i) => (
+        <Text key={i} style={styles.nudgeText}>{nudge}</Text>
+      ))}
+    </View>
+  );
+}
+
+function PositiveNotesSection({ notes }: { notes: string[] }) {
+  return (
+    <View style={styles.positiveContainer}>
+      {notes.map((note, i) => (
+        <Text key={i} style={styles.positiveText}>{note}</Text>
+      ))}
+    </View>
   );
 }
 
@@ -208,6 +255,30 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 32,
     paddingHorizontal: 16,
+  },
+  nudgesContainer: {
+    width: '100%',
+    marginBottom: 16,
+    paddingHorizontal: 8,
+  },
+  nudgeText: {
+    color: '#999999',
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 6,
+    paddingLeft: 12,
+  },
+  positiveContainer: {
+    width: '100%',
+    marginBottom: 16,
+    paddingHorizontal: 8,
+  },
+  positiveText: {
+    color: '#2ECC71',
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 6,
+    paddingLeft: 12,
   },
   syncHint: {
     color: '#555555',

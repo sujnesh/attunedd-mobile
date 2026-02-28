@@ -1,6 +1,6 @@
 import { executeSql } from '../db/database';
 import { deriveCaps, type PolicyCaps } from '../state/evaluationEngine';
-import type { PenaltyItem } from '../types/api';
+import type { CoachingData, PenaltyItem } from '../types/api';
 
 export interface ParsedCaps {
   maxRpe: number;
@@ -17,6 +17,7 @@ export interface EvaluationData {
   penalties: PenaltyItem[];
   rawMetrics: Record<string, unknown>;
   source: 'server' | 'local';
+  coaching: CoachingData | null;
 }
 
 export async function getMeta(key: string): Promise<string | null> {
@@ -54,16 +55,17 @@ export async function getEvaluationSnapshot(): Promise<EvaluationData> {
     'last_penalties_json',
     'last_raw_metrics_json',
     'last_evaluation_source',
+    'last_coaching_json',
   ];
 
   const [result] = await executeSql(
-    `SELECT key, value FROM meta_state WHERE key IN (?, ?, ?, ?, ?, ?);`,
+    `SELECT key, value FROM meta_state WHERE key IN (?, ?, ?, ?, ?, ?, ?);`,
     keys
   );
 
   const emptyResult: EvaluationData = {
     score: null, band: null, caps: null, timestamp: null,
-    penalties: [], rawMetrics: {}, source: 'local',
+    penalties: [], rawMetrics: {}, source: 'local', coaching: null,
   };
 
   if (result.rows.length === 0) {
@@ -104,5 +106,12 @@ export async function getEvaluationSnapshot(): Promise<EvaluationData> {
 
   const source: 'server' | 'local' = map.last_evaluation_source === 'server' ? 'server' : 'local';
 
-  return { score, band, caps, timestamp, penalties, rawMetrics, source };
+  let coaching: CoachingData | null = null;
+  try {
+    coaching = map.last_coaching_json ? JSON.parse(map.last_coaching_json) : null;
+  } catch {
+    coaching = null;
+  }
+
+  return { score, band, caps, timestamp, penalties, rawMetrics, source, coaching };
 }
