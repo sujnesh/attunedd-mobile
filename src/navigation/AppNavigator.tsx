@@ -8,6 +8,7 @@ import DashboardScreen from '../screens/DashboardScreen';
 import TrainStack from './TrainStack';
 import HealthScreen from '../screens/HealthScreen';
 import SyncScreen from '../screens/SyncScreen';
+import SettingsScreen from '../screens/SettingsScreen';
 import LoginScreen from '../screens/LoginScreen';
 import RegisterScreen from '../screens/RegisterScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
@@ -23,6 +24,7 @@ const TAB_ICONS: Record<string, string> = {
   Train: '\u25B2',      // ▲
   Health: '\u2661',     // ♡
   Sync: '\u21BB',       // ↻
+  Settings: '\u2699',   // ⚙
 };
 
 function AuthNavigator() {
@@ -64,6 +66,7 @@ function MainTabs() {
       <Tab.Screen name="Train" component={TrainStack} />
       <Tab.Screen name="Health" component={HealthScreen} />
       <Tab.Screen name="Sync" component={SyncScreen} />
+      <Tab.Screen name="Settings" component={SettingsScreen} />
     </Tab.Navigator>
   );
 }
