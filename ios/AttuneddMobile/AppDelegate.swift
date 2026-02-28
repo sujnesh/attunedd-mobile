@@ -4,7 +4,6 @@ import React
 import React_RCTAppDelegate
 import ReactAppDependencyProvider
 import TSBackgroundFetch
-import RNCPushNotificationIOS
 
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
