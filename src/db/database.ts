@@ -9,6 +9,14 @@ const DB_LOCATION = 'default';
 let dbInstance: SQLiteDatabase | null = null;
 let dbInitPromise: Promise<SQLiteDatabase> | null = null;
 
+/**
+ * Explicit boot entry point. Must be awaited before any DB access.
+ * Safe to call multiple times — only the first call opens + migrates.
+ */
+export async function initializeDatabase(): Promise<void> {
+  await getDatabase();
+}
+
 export async function getDatabase(): Promise<SQLiteDatabase> {
   if (dbInstance) {
     return dbInstance;

@@ -10,13 +10,18 @@ import {
   View,
   useColorScheme,
 } from 'react-native';
+import { initializeDatabase } from './src/db/database';
 import { initializeBackgroundSystem } from './src/state/backgroundBridge';
 
 function App() {
   const isDarkMode = useColorScheme() === 'dark';
 
   useEffect(() => {
-    initializeBackgroundSystem().catch(console.error);
+    const boot = async () => {
+      await initializeDatabase();
+      await initializeBackgroundSystem();
+    };
+    boot().catch(console.error);
   }, []);
 
   return (
