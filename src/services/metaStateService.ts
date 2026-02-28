@@ -1,6 +1,6 @@
 import { executeSql } from '../db/database';
 import { deriveCaps, type PolicyCaps } from '../state/evaluationEngine';
-import type { CoachingData, PenaltyItem } from '../types/api';
+import type { CoachingData, DebriefData, PenaltyItem } from '../types/api';
 
 export interface ParsedCaps {
   maxRpe: number;
@@ -114,4 +114,18 @@ export async function getEvaluationSnapshot(): Promise<EvaluationData> {
   }
 
   return { score, band, caps, timestamp, penalties, rawMetrics, source, coaching };
+}
+
+export async function getLatestDebrief(): Promise<DebriefData | null> {
+  const raw = await getMeta('last_debrief_json');
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as DebriefData;
+  } catch {
+    return null;
+  }
+}
+
+export async function clearDebrief(): Promise<void> {
+  await executeSql(`DELETE FROM meta_state WHERE key = 'last_debrief_json';`);
 }

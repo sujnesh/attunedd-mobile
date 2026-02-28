@@ -1,5 +1,5 @@
 import { executeSql } from '../db/database';
-import type { SyncResponse } from '../types/api';
+import type { SyncResponse, DebriefData } from '../types/api';
 import {
   getPendingEvents,
   markEventSynced,
@@ -70,6 +70,10 @@ export async function flushQueue(authToken: string): Promise<FlushResult> {
         if (body.authoritative_state) {
           const mobileLocalId = extractMobileLocalId(event.payload);
           await applyAuthoritativeState(body.authoritative_state, mobileLocalId);
+        }
+
+        if (body.debrief) {
+          await persistDebrief(body.debrief);
         }
 
         if (body.sync_version) {
@@ -162,6 +166,13 @@ async function setLastSyncAt(timestamp: string): Promise<void> {
   await executeSql(
     `INSERT OR REPLACE INTO meta_state (key, value) VALUES ('last_sync_at', ?);`,
     [timestamp]
+  );
+}
+
+async function persistDebrief(debrief: DebriefData): Promise<void> {
+  await executeSql(
+    `INSERT OR REPLACE INTO meta_state (key, value) VALUES ('last_debrief_json', ?);`,
+    [JSON.stringify(debrief)]
   );
 }
 

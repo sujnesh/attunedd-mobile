@@ -57,12 +57,27 @@ export interface AuthoritativeState {
   coaching?: CoachingData;
 }
 
+export interface DebriefData {
+  score_before: number;
+  score_after: number;
+  adaptation_delta: number;
+  band_before: string;
+  band_after: string;
+  band_dropped: boolean;
+  stress_utilization: number;
+  effort_rating: 'light' | 'moderate' | 'solid' | 'overdone';
+  sets_logged: number;
+  muscles_trained: string[];
+  summary_line: string;
+}
+
 export interface SyncResponse {
   status: 'accepted' | 'rejected' | 'stale_client' | 'error';
   authoritative_state: AuthoritativeState;
   override_count: number;
   sync_version: number;
   message?: string;
+  debrief?: DebriefData;
 }
 
 export interface SyncRequestHeaders {
