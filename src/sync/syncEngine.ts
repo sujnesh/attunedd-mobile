@@ -8,7 +8,8 @@ import {
 import { applyAuthoritativeState } from './reconciliation';
 import { EVENT_TYPES } from './eventTypes';
 
-const API_BASE_URL = 'https://attunedd.com/api';
+// TODO: revert before deploy — local testing
+const API_BASE_URL = __DEV__ ? 'http://localhost:3000' : 'https://attunedd.com/api';
 const EVENTS_ENDPOINT = `${API_BASE_URL}/mobile/events`;
 
 export interface FlushResult {
