@@ -1,74 +1,28 @@
-import React, { useEffect } from 'react';
-import {
-  SafeAreaProvider,
-  useSafeAreaInsets,
-} from 'react-native-safe-area-context';
-import {
-  StatusBar,
-  StyleSheet,
-  Text,
-  View,
-  useColorScheme,
-} from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { StatusBar } from 'react-native';
 import { initializeDatabase } from './src/db/database';
 import { initializeBackgroundSystem } from './src/state/backgroundBridge';
+import DashboardScreen from './src/screens/DashboardScreen';
 
 function App() {
-  const isDarkMode = useColorScheme() === 'dark';
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     const boot = async () => {
       await initializeDatabase();
       await initializeBackgroundSystem();
+      setReady(true);
     };
     boot().catch(console.error);
   }, []);
 
   return (
     <SafeAreaProvider>
-      <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
-      <AppContent isDarkMode={isDarkMode} />
+      <StatusBar barStyle="light-content" />
+      {ready && <DashboardScreen />}
     </SafeAreaProvider>
   );
 }
-
-function AppContent({ isDarkMode }: { isDarkMode: boolean }) {
-  const insets = useSafeAreaInsets();
-
-  return (
-    <View
-      style={[
-        styles.container,
-        {
-          paddingTop: insets.top,
-          backgroundColor: isDarkMode ? '#1a1a1a' : '#ffffff',
-        },
-      ]}>
-      <Text style={[styles.title, { color: isDarkMode ? '#fff' : '#000' }]}>
-        Attunedd Mobile
-      </Text>
-      <Text
-        style={[styles.subtitle, { color: isDarkMode ? '#aaa' : '#666' }]}>
-        Background system initialized
-      </Text>
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-  },
-  subtitle: {
-    fontSize: 16,
-    marginTop: 8,
-  },
-});
 
 export default App;

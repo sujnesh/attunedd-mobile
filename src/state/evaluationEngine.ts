@@ -136,7 +136,7 @@ async function getLatestCapacity(): Promise<number> {
   return 1.0;
 }
 
-function deriveCaps(riskBand: string): PolicyCaps {
+export function deriveCaps(riskBand: string): PolicyCaps {
   switch (riskBand) {
     case 'red':
       return { max_rpe: 7, max_allowed_stress_pct: 70, block_heavy_neural: true, max_cardio_zone: 3 };
