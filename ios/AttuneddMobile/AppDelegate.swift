@@ -23,8 +23,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     reactNativeDelegate = delegate
     reactNativeFactory = factory
 
-    // Initialize background fetch
-    TSBackgroundFetch.sharedInstance().didFinishLaunching()
+    // Initialize background fetch and register custom processing task
+    let fetch = TSBackgroundFetch.sharedInstance()!
+    fetch.didFinishLaunching()
+    fetch.registerBGProcessingTask("com.attunedd.daily-evaluation")
 
     // Set up push notification delegate
     UNUserNotificationCenter.current().delegate = self
