@@ -11,7 +11,7 @@ import {
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { AuthStackParamList } from '../navigation/types';
 import { login } from '../navigation/AppNavigator';
-import { API_BASE_URL } from '../config';
+import { api, ApiError } from '../services/apiClient';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
 
@@ -28,21 +28,18 @@ export default function LoginScreen({ navigation }: Props) {
 
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), password }),
-      });
-
-      const body = await response.json();
-
-      if (response.ok) {
-        await login(body.api_token, body.has_preferences ?? false);
+      const body = await api<{ api_token: string; has_preferences?: boolean }>(
+        '/api/auth/login',
+        { method: 'POST', body: { email: email.trim(), password }, skipAuth: true },
+      );
+      await login(body.api_token, body.has_preferences ?? false);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        const msg = (err.body as { error?: string })?.error ?? 'Invalid credentials';
+        Alert.alert('Login Failed', msg);
       } else {
-        Alert.alert('Login Failed', body.error || 'Invalid credentials');
+        Alert.alert('Error', 'Could not connect to server');
       }
-    } catch {
-      Alert.alert('Error', 'Could not connect to server');
     } finally {
       setLoading(false);
     }

@@ -11,7 +11,7 @@ import {
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { AuthStackParamList } from '../navigation/types';
 import { login } from '../navigation/AppNavigator';
-import { API_BASE_URL } from '../config';
+import { api, ApiError } from '../services/apiClient';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Register'>;
 
@@ -34,26 +34,23 @@ export default function RegisterScreen({ navigation }: Props) {
 
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: email.trim(),
-          password,
-          password_confirmation: passwordConfirmation,
-        }),
-      });
-
-      const body = await response.json();
-
-      if (response.ok) {
-        await login(body.api_token, body.has_preferences ?? false);
-      } else {
-        const message = body.errors?.join('\n') || 'Registration failed';
+      const body = await api<{ api_token: string; has_preferences?: boolean }>(
+        '/api/auth/register',
+        {
+          method: 'POST',
+          body: { email: email.trim(), password, password_confirmation: passwordConfirmation },
+          skipAuth: true,
+        },
+      );
+      await login(body.api_token, body.has_preferences ?? false);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        const parsed = err.body as { errors?: string[] } | null;
+        const message = parsed?.errors?.join('\n') ?? 'Registration failed';
         Alert.alert('Registration Failed', message);
+      } else {
+        Alert.alert('Error', 'Could not connect to server');
       }
-    } catch {
-      Alert.alert('Error', 'Could not connect to server');
     } finally {
       setLoading(false);
     }

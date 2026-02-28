@@ -4,6 +4,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { initializeDatabase } from './src/db/database';
 import { initializeBackgroundSystem } from './src/state/backgroundBridge';
 import AppNavigator from './src/navigation/AppNavigator';
+import ErrorBoundary from './src/components/ErrorBoundary';
 
 function App() {
   const [ready, setReady] = useState(false);
@@ -18,10 +19,12 @@ function App() {
   }, []);
 
   return (
-    <SafeAreaProvider>
-      <StatusBar barStyle="light-content" />
-      {ready ? <AppNavigator /> : <View style={{ flex: 1, backgroundColor: '#0A0A0A' }} />}
-    </SafeAreaProvider>
+    <ErrorBoundary>
+      <SafeAreaProvider>
+        <StatusBar barStyle="light-content" />
+        {ready ? <AppNavigator /> : <View style={{ flex: 1, backgroundColor: '#0A0A0A' }} />}
+      </SafeAreaProvider>
+    </ErrorBoundary>
   );
 }
 

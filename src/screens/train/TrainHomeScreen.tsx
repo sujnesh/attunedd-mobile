@@ -17,8 +17,8 @@ import {
 import { createOverrideTracker } from '../../workout/core/overrideTracker';
 import type { TrainHomeProps } from '../../navigation/types';
 import type { PolicyCaps } from '../../engine/types';
-import type { PlanDayData, PlanData } from '../../types/api';
-import { API_BASE_URL } from '../../config';
+import type { PlanDayData, CurrentPlanResponse } from '../../types/api';
+import { api } from '../../services/apiClient';
 
 const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
 
@@ -165,17 +165,9 @@ async function fetchTodayPlan(
   setTodaySession: (s: PlanDayData | null) => void,
 ) {
   try {
-    const token = await getMeta('auth_token');
-    if (!token) return;
-
-    const res = await fetch(`${API_BASE_URL}/api/plans/current`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) return;
-
-    const body = await res.json();
+    const body = await api<CurrentPlanResponse>('/api/plans/current');
     setPlanName(body.plan?.name ?? null);
-    const today = (body.week as PlanDayData[])?.find((d) => d.today) ?? null;
+    const today = body.week?.find((d) => d.today) ?? null;
     setTodaySession(today);
   } catch {
     // Non-fatal

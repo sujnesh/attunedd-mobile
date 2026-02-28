@@ -13,7 +13,7 @@ import RegisterScreen from '../screens/RegisterScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
 import { getMeta, setMeta } from '../services/metaStateService';
 import { onAuthChange, emitAuthChange } from '../services/authEvents';
-import { API_BASE_URL } from '../config';
+import { api } from '../services/apiClient';
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
@@ -120,16 +120,10 @@ export async function completeOnboarding() {
 }
 
 export async function logout() {
-  const token = await getMeta('auth_token');
-  if (token) {
-    try {
-      await fetch(`${API_BASE_URL}/api/auth/logout`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-    } catch {
-      // Server unreachable — still clear local token
-    }
+  try {
+    await api('/api/auth/logout', { method: 'DELETE' });
+  } catch {
+    // Server unreachable — still clear local token
   }
   await setMeta('auth_token', '');
   await setMeta('has_preferences', 'false');

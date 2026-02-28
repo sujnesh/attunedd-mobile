@@ -8,14 +8,13 @@ import {
   type ReadinessState,
 } from '../services/readinessService';
 import type { ParsedCaps } from '../services/metaStateService';
-import { getMeta } from '../services/metaStateService';
 import {
   buildExplanation,
   type ExplanationOutput,
   type PenaltyRow,
   type LimitRow,
 } from '../services/explanationEngine';
-import { API_BASE_URL } from '../config';
+import { api } from '../services/apiClient';
 import type { ProjectionDay, HeavySessionSimulation, ProjectionsResponse } from '../types/api';
 
 const BAND_COLORS: Record<string, string> = {
@@ -76,22 +75,9 @@ export default function DashboardScreen() {
 
   const fetchProjections = useCallback(async () => {
     try {
-      const token = await getMeta('auth_token');
-      if (!token) return;
-
-      const res = await fetch(`${API_BASE_URL}/api/coaching/projections`, {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (res.ok) {
-        const body: ProjectionsResponse = await res.json();
-        setProjections(body.projections);
-        setHeavySim(body.heavy_session_simulation);
-      }
+      const body = await api<ProjectionsResponse>('/api/coaching/projections');
+      setProjections(body.projections);
+      setHeavySim(body.heavy_session_simulation);
     } catch {
       // projection fetch failure is non-fatal
     }

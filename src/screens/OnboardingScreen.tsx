@@ -9,8 +9,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { API_BASE_URL } from '../config';
-import { getMeta } from '../services/metaStateService';
+import { api, ApiError } from '../services/apiClient';
 import { completeOnboarding } from '../navigation/AppNavigator';
 
 const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
@@ -109,19 +108,9 @@ export default function OnboardingScreen() {
   const handleSubmit = async () => {
     setSubmitting(true);
     try {
-      const token = await getMeta('auth_token');
-      if (!token) {
-        Alert.alert('Error', 'Not authenticated');
-        return;
-      }
-
-      const res = await fetch(`${API_BASE_URL}/api/onboarding/preferences`, {
+      await api('/api/onboarding/preferences', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
+        body: {
           preferences: {
             training_type: selections.training_type,
             primary_goal: selections.primary_goal,
@@ -130,18 +119,17 @@ export default function OnboardingScreen() {
             equipment: selections.equipment,
             session_minutes: parseInt(selections.session_minutes, 10),
           },
-        }),
+        },
       });
-
-      if (res.ok) {
-        await completeOnboarding();
-      } else {
-        const body = await res.json();
-        const msg = body.errors?.join('\n') || 'Could not save preferences';
+      await completeOnboarding();
+    } catch (err) {
+      if (err instanceof ApiError) {
+        const parsed = err.body as { errors?: string[] } | null;
+        const msg = parsed?.errors?.join('\n') ?? 'Could not save preferences';
         Alert.alert('Error', msg);
+      } else {
+        Alert.alert('Error', 'Could not connect to server');
       }
-    } catch {
-      Alert.alert('Error', 'Could not connect to server');
     } finally {
       setSubmitting(false);
     }
