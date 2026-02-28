@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -11,6 +11,7 @@ import SyncScreen from '../screens/SyncScreen';
 import LoginScreen from '../screens/LoginScreen';
 import RegisterScreen from '../screens/RegisterScreen';
 import { getMeta, setMeta } from '../services/metaStateService';
+import { onAuthChange, emitAuthChange } from '../services/authEvents';
 import { API_BASE_URL } from '../config';
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
@@ -70,18 +71,17 @@ export default function AppNavigator() {
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [checking, setChecking] = useState(true);
 
-  const checkAuth = useCallback(async () => {
-    const token = await getMeta('auth_token');
-    setAuthToken(token);
-    setChecking(false);
-  }, []);
-
   useEffect(() => {
-    checkAuth();
-    // Poll for auth state changes (login/register write to meta_state)
-    const interval = setInterval(checkAuth, 1000);
-    return () => clearInterval(interval);
-  }, [checkAuth]);
+    getMeta('auth_token').then(token => {
+      setAuthToken(token);
+      setChecking(false);
+    });
+
+    const unsubscribe = onAuthChange(token => {
+      setAuthToken(token);
+    });
+    return unsubscribe;
+  }, []);
 
   if (checking) {
     return null;
@@ -92,6 +92,11 @@ export default function AppNavigator() {
       {authToken ? <MainTabs /> : <AuthNavigator />}
     </NavigationContainer>
   );
+}
+
+export async function login(token: string) {
+  await setMeta('auth_token', token);
+  emitAuthChange(token);
 }
 
 export async function logout() {
@@ -107,4 +112,5 @@ export async function logout() {
     }
   }
   await setMeta('auth_token', '');
+  emitAuthChange(null);
 }

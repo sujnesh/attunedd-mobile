@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { AuthStackParamList } from '../navigation/types';
-import { setMeta } from '../services/metaStateService';
+import { login } from '../navigation/AppNavigator';
 import { API_BASE_URL } from '../config';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
@@ -37,8 +37,7 @@ export default function LoginScreen({ navigation }: Props) {
       const body = await response.json();
 
       if (response.ok) {
-        await setMeta('auth_token', body.api_token);
-        // Navigation handled by auth state listener in AppNavigator
+        await login(body.api_token);
       } else {
         Alert.alert('Login Failed', body.error || 'Invalid credentials');
       }
