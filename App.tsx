@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
+import { StatusBar, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { StatusBar } from 'react-native';
 import { initializeDatabase } from './src/db/database';
 import { initializeBackgroundSystem } from './src/state/backgroundBridge';
-import DashboardScreen from './src/screens/DashboardScreen';
+import AppNavigator from './src/navigation/AppNavigator';
 
 function App() {
   const [ready, setReady] = useState(false);
@@ -20,7 +20,7 @@ function App() {
   return (
     <SafeAreaProvider>
       <StatusBar barStyle="light-content" />
-      {ready && <DashboardScreen />}
+      {ready ? <AppNavigator /> : <View style={{ flex: 1, backgroundColor: '#0A0A0A' }} />}
     </SafeAreaProvider>
   );
 }

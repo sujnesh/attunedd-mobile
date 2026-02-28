@@ -44,3 +44,28 @@ jest.mock('react-native-health-connect', () => ({
   requestPermission: jest.fn(),
   readRecords: jest.fn(),
 }));
+
+jest.mock('react-native-screens', () => ({
+  enableScreens: jest.fn(),
+}));
+
+jest.mock('@react-navigation/native', () => ({
+  NavigationContainer: ({ children }) => children,
+  useFocusEffect: jest.fn(),
+  useNavigation: () => ({ navigate: jest.fn(), goBack: jest.fn() }),
+  useRoute: () => ({ params: {} }),
+}));
+
+jest.mock('@react-navigation/bottom-tabs', () => ({
+  createBottomTabNavigator: () => ({
+    Navigator: ({ children }) => children,
+    Screen: ({ children }) => children,
+  }),
+}));
+
+jest.mock('@react-navigation/native-stack', () => ({
+  createNativeStackNavigator: () => ({
+    Navigator: ({ children }) => children,
+    Screen: ({ children }) => children,
+  }),
+}));

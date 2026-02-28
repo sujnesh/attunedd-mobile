@@ -1,15 +1,13 @@
-import React, { useEffect, useState } from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { executeSql } from '../db/database';
-import { deriveCaps, type PolicyCaps } from '../state/evaluationEngine';
-
-interface DashboardData {
-  score: number;
-  riskBand: string;
-  caps: PolicyCaps;
-  timestamp: number;
-}
+import { useFocusEffect } from '@react-navigation/native';
+import {
+  loadLatestEvaluation,
+  triggerManualEvaluation,
+  type ReadinessState,
+} from '../services/readinessService';
+import type { ParsedCaps } from '../services/metaStateService';
 
 const BAND_COLORS: Record<string, string> = {
   green: '#2ECC71',
@@ -23,40 +21,8 @@ const BAND_LABELS: Record<string, string> = {
   red: 'HIGH RISK',
 };
 
-async function loadDashboardData(): Promise<DashboardData | null> {
-  const keys = [
-    'last_adaptation_score',
-    'last_risk_band',
-    'last_evaluation_timestamp',
-  ];
-
-  const [result] = await executeSql(
-    `SELECT key, value FROM meta_state WHERE key IN (?, ?, ?);`,
-    keys
-  );
-
-  if (result.rows.length === 0) return null;
-
-  const map: Record<string, string> = {};
-  for (let i = 0; i < result.rows.length; i++) {
-    const row = result.rows.item(i);
-    map[row.key] = row.value;
-  }
-
-  if (!map.last_adaptation_score || !map.last_risk_band) return null;
-
-  const riskBand = map.last_risk_band;
-
-  return {
-    score: Math.round(parseFloat(map.last_adaptation_score)),
-    riskBand,
-    caps: deriveCaps(riskBand),
-    timestamp: parseInt(map.last_evaluation_timestamp || '0', 10),
-  };
-}
-
-function formatTimestamp(ts: number): string {
-  if (ts <= 0) return '—';
+function formatTimestamp(ts: number | null): string {
+  if (ts == null || ts <= 0) return '—';
   const d = new Date(ts);
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
@@ -67,21 +33,39 @@ function formatTimestamp(ts: number): string {
 
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
-  const [data, setData] = useState<DashboardData | null>(null);
+  const [state, setState] = useState<ReadinessState | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    loadDashboardData()
-      .then((d) => {
-        setData(d);
-        setLoaded(true);
-      })
-      .catch(() => setLoaded(true));
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      loadLatestEvaluation()
+        .then((s) => {
+          setState(s);
+          setLoaded(true);
+        })
+        .catch(() => setLoaded(true));
+    }, [])
+  );
+
+  const handleRefresh = useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      const freshData = await triggerManualEvaluation();
+      setState({ data: freshData, isStale: false });
+    } catch {
+      // refresh failure is non-fatal
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshing]);
 
   if (!loaded) return <View style={styles.root} />;
 
-  if (!data) {
+  const data = state?.data ?? null;
+
+  if (!data || data.score == null || !data.band || !data.caps) {
     return (
       <View style={[styles.root, { paddingTop: insets.top }]}>
         <Text style={styles.pending}>Evaluation pending...</Text>
@@ -89,22 +73,40 @@ export default function DashboardScreen() {
     );
   }
 
-  const accent = BAND_COLORS[data.riskBand] ?? '#888888';
-  const bandLabel = BAND_LABELS[data.riskBand] ?? data.riskBand.toUpperCase();
+  const accent = BAND_COLORS[data.band] ?? '#888888';
+  const bandLabel = BAND_LABELS[data.band] ?? data.band.toUpperCase();
 
   return (
     <View style={[styles.root, { paddingTop: insets.top + 40 }]}>
       <Text style={[styles.score, { color: accent }]}>{data.score}</Text>
       <Text style={[styles.bandLabel, { color: accent }]}>{bandLabel}</Text>
 
-      <View style={styles.capsBlock}>
-        <CapsRow label="MAX RPE" value={String(data.caps.max_rpe)} />
-        <CapsRow label="STRESS %" value={`${data.caps.max_allowed_stress_pct}%`} />
-        <CapsRow label="HEAVY NEURAL" value={data.caps.block_heavy_neural ? 'BLOCKED' : 'ALLOWED'} />
-        <CapsRow label="MAX ZONE" value={String(data.caps.max_cardio_zone)} />
-      </View>
+      <CapsGrid caps={data.caps} />
 
       <Text style={styles.timestamp}>{formatTimestamp(data.timestamp)}</Text>
+
+      <Pressable
+        onPress={handleRefresh}
+        style={styles.refreshButton}
+        disabled={refreshing}>
+        <Text style={[styles.refreshText, refreshing && styles.refreshing]}>
+          {refreshing ? 'REFRESHING' : 'REFRESH'}
+        </Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function CapsGrid({ caps }: { caps: ParsedCaps }) {
+  return (
+    <View style={styles.capsBlock}>
+      <CapsRow label="MAX RPE" value={String(caps.maxRpe)} />
+      <CapsRow label="STRESS %" value={`${caps.maxStressPct}%`} />
+      <CapsRow
+        label="HEAVY NEURAL"
+        value={caps.blockHeavyNeural ? 'BLOCKED' : 'ALLOWED'}
+      />
+      <CapsRow label="MAX ZONE" value={String(caps.maxCardioZone)} />
     </View>
   );
 }
@@ -118,6 +120,8 @@ function CapsRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
+
 const styles = StyleSheet.create({
   root: {
     flex: 1,
@@ -126,18 +130,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
   },
   pending: {
-    flex: 1,
     color: '#888888',
     fontSize: 16,
     textAlign: 'center',
-    textAlignVertical: 'center',
     marginTop: 200,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontFamily: MONO,
   },
   score: {
     fontSize: 64,
     fontWeight: '200',
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontFamily: MONO,
     letterSpacing: 2,
     marginBottom: 4,
   },
@@ -168,13 +170,28 @@ const styles = StyleSheet.create({
     color: '#EAEAEA',
     fontSize: 14,
     fontWeight: '500',
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontFamily: MONO,
   },
   timestamp: {
     color: '#888888',
     fontSize: 11,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontFamily: MONO,
     marginTop: 48,
     letterSpacing: 1,
+  },
+  refreshButton: {
+    marginTop: 32,
+    paddingVertical: 8,
+    paddingHorizontal: 24,
+  },
+  refreshText: {
+    color: '#555555',
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 3,
+    fontFamily: MONO,
+  },
+  refreshing: {
+    color: '#333333',
   },
 });
