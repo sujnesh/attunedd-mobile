@@ -14,7 +14,7 @@ import {
   type PenaltyRow,
   type LimitRow,
 } from '../services/explanationEngine';
-import { api } from '../services/apiClient';
+import { apiCached } from '../services/apiClient';
 import type { ProjectionDay, HeavySessionSimulation, ProjectionsResponse } from '../types/api';
 
 const BAND_COLORS: Record<string, string> = {
@@ -75,7 +75,7 @@ export default function DashboardScreen() {
 
   const fetchProjections = useCallback(async () => {
     try {
-      const body = await api<ProjectionsResponse>('/api/coaching/projections');
+      const body = await apiCached<ProjectionsResponse>('/api/coaching/projections', 'cache_projections');
       setProjections(body.projections);
       setHeavySim(body.heavy_session_simulation);
     } catch {

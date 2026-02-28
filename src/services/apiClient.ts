@@ -1,5 +1,6 @@
 import { API_BASE_URL } from '../config';
-import { getMeta } from './metaStateService';
+import { getMeta, setMeta } from './metaStateService';
+import { emitAuthChange } from './authEvents';
 
 export class ApiError extends Error {
   constructor(
@@ -54,8 +55,42 @@ export async function api<T = unknown>(path: string, options: RequestOptions = {
     } catch {
       parsed = null;
     }
+
+    // Auto-logout on 401 — token was invalidated server-side
+    if (res.status === 401 && !skipAuth) {
+      await setMeta('auth_token', '');
+      await setMeta('has_preferences', 'false');
+      emitAuthChange(null);
+    }
+
     throw new ApiError(res.status, parsed);
   }
 
   return res.json() as Promise<T>;
+}
+
+/**
+ * Fetch with offline cache fallback.
+ * On success: caches response in meta_state under the given key.
+ * On failure: returns cached data if available, otherwise re-throws.
+ */
+export async function apiCached<T = unknown>(
+  path: string,
+  cacheKey: string,
+  options: RequestOptions = {},
+): Promise<T> {
+  try {
+    const data = await api<T>(path, options);
+    await setMeta(cacheKey, JSON.stringify(data));
+    return data;
+  } catch (err) {
+    // On network failure (not API errors like 401/403), try cache
+    if (err instanceof ApiError) throw err;
+
+    const cached = await getMeta(cacheKey);
+    if (cached) {
+      return JSON.parse(cached) as T;
+    }
+    throw err;
+  }
 }

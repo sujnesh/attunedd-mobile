@@ -18,7 +18,7 @@ import { createOverrideTracker } from '../../workout/core/overrideTracker';
 import type { TrainHomeProps } from '../../navigation/types';
 import type { PolicyCaps } from '../../engine/types';
 import type { PlanDayData, CurrentPlanResponse } from '../../types/api';
-import { api } from '../../services/apiClient';
+import { apiCached } from '../../services/apiClient';
 
 const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
 
@@ -165,7 +165,7 @@ async function fetchTodayPlan(
   setTodaySession: (s: PlanDayData | null) => void,
 ) {
   try {
-    const body = await api<CurrentPlanResponse>('/api/plans/current');
+    const body = await apiCached<CurrentPlanResponse>('/api/plans/current', 'cache_plans_current');
     setPlanName(body.plan?.name ?? null);
     const today = body.week?.find((d) => d.today) ?? null;
     setTodaySession(today);
