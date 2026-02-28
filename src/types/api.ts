@@ -91,6 +91,46 @@ export interface ProjectionsResponse {
   heavy_session_simulation: HeavySessionSimulation | null;
 }
 
+export interface PlanExercise {
+  name: string;
+  sets?: number;
+  rep_range?: string;
+  rpe_target?: number;
+  rest_seconds?: number;
+  duration_minutes?: number;
+  zone?: string;
+  intervals?: string;
+  notes?: string | null;
+}
+
+export interface PlanBlock {
+  name: string;
+  exercises: PlanExercise[];
+}
+
+export interface PlanDayData {
+  date: string;
+  session_id: number;
+  session_type: string;
+  rest_day: boolean;
+  blocks: PlanBlock[];
+  workout_status: string | null;
+  today: boolean;
+}
+
+export interface PlanData {
+  id: number;
+  name: string;
+  training_type: string;
+  starts_on: string;
+  active: boolean;
+}
+
+export interface CurrentPlanResponse {
+  plan: PlanData | null;
+  week: PlanDayData[];
+}
+
 export interface SyncResponse {
   status: 'accepted' | 'rejected' | 'stale_client' | 'error';
   authoritative_state: AuthoritativeState;

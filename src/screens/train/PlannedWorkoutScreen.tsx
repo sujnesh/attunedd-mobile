@@ -17,6 +17,9 @@ import { useActiveWorkout } from '../../workout/controller/useActiveWorkout';
 import type { Deviation } from '../../workout/core/deviationEngine';
 import type { SessionSet } from '../../workout/core/sessionState';
 import type { PlannedWorkoutProps } from '../../navigation/types';
+import type { PlanBlock } from '../../types/api';
+import { API_BASE_URL } from '../../config';
+import { getMeta } from '../../services/metaStateService';
 
 const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
 
@@ -43,9 +46,12 @@ export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorko
     reps: number;
     rpe: number;
   } | null>(null);
+  const [planBlocks, setPlanBlocks] = useState<PlanBlock[]>([]);
+  const [showPlan, setShowPlan] = useState(true);
 
   useEffect(() => {
     initSession('planned', draftId);
+    fetchTodayBlocks(setPlanBlocks);
   }, [draftId, initSession]);
 
   const handleSubmit = async () => {
@@ -156,6 +162,33 @@ export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorko
       )}
 
       <ScrollView style={styles.setList} keyboardShouldPersistTaps="handled">
+        {planBlocks.length > 0 && (
+          <View style={styles.prescribedSection}>
+            <Pressable onPress={() => setShowPlan(!showPlan)} style={styles.prescribedHeader}>
+              <Text style={styles.prescribedLabel}>PRESCRIBED</Text>
+              <Text style={styles.prescribedToggle}>{showPlan ? 'HIDE' : 'SHOW'}</Text>
+            </Pressable>
+            {showPlan && planBlocks
+              .filter((b) => b.name === 'Main')
+              .flatMap((b) => b.exercises)
+              .map((ex, i) => (
+                <View key={i} style={styles.prescribedRow}>
+                  <Text style={styles.prescribedName}>{ex.name}</Text>
+                  <Text style={styles.prescribedDetail}>
+                    {ex.sets && ex.rep_range
+                      ? `${ex.sets}×${ex.rep_range} @RPE ${ex.rpe_target ?? '—'}`
+                      : ex.duration_minutes
+                        ? `${ex.duration_minutes} min${ex.zone ? ` ${ex.zone}` : ''}`
+                        : ''}
+                  </Text>
+                </View>
+              ))}
+          </View>
+        )}
+
+        {exercises.length > 0 && (
+          <Text style={styles.loggedLabel}>LOGGED</Text>
+        )}
         {exercises.map(([name, sets]) => (
           <View key={name} style={styles.exerciseBlock}>
             <View style={styles.exerciseHeader}>
@@ -221,6 +254,26 @@ export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorko
       </View>
     </KeyboardAvoidingView>
   );
+}
+
+async function fetchTodayBlocks(setBlocks: (b: PlanBlock[]) => void) {
+  try {
+    const token = await getMeta('auth_token');
+    if (!token) return;
+
+    const res = await fetch(`${API_BASE_URL}/api/plans/current`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return;
+
+    const body = await res.json();
+    const today = body.week?.find((d: { today: boolean }) => d.today);
+    if (today?.blocks) {
+      setBlocks(today.blocks);
+    }
+  } catch {
+    // Non-fatal
+  }
 }
 
 function groupByExercise(sets: SessionSet[]): [string, SessionSet[]][] {
@@ -313,6 +366,52 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 24,
     paddingTop: 16,
+  },
+  prescribedSection: {
+    marginBottom: 20,
+    borderWidth: 0.5,
+    borderColor: '#1A3A1A',
+    padding: 12,
+  },
+  prescribedHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  prescribedLabel: {
+    color: '#2ECC71',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 2,
+  },
+  prescribedToggle: {
+    color: '#555555',
+    fontSize: 9,
+    fontWeight: '600',
+    letterSpacing: 1,
+  },
+  prescribedRow: {
+    paddingVertical: 4,
+  },
+  prescribedName: {
+    color: '#888888',
+    fontSize: 11,
+    fontWeight: '600',
+    fontFamily: MONO,
+  },
+  prescribedDetail: {
+    color: '#555555',
+    fontSize: 10,
+    fontFamily: MONO,
+    marginTop: 1,
+  },
+  loggedLabel: {
+    color: '#555555',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 2,
+    marginBottom: 12,
   },
   exerciseBlock: {
     marginBottom: 20,
