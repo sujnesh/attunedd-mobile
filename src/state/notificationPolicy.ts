@@ -4,6 +4,18 @@ import PushNotification from 'react-native-push-notification';
 const CHANNEL_ID = 'attunedd-readiness';
 
 export function configureNotifications(): void {
+  PushNotification.configure({
+    onNotification: function (_notification: any) {},
+    onRegistrationError: function (_err: any) {},
+    permissions: {
+      alert: true,
+      badge: true,
+      sound: true,
+    },
+    popInitialNotification: false,
+    requestPermissions: Platform.OS === 'ios',
+  });
+
   PushNotification.createChannel(
     {
       channelId: CHANNEL_ID,
