@@ -6,6 +6,7 @@ import type { DebriefData } from '../types/api';
 export type AuthStackParamList = {
   Login: undefined;
   Register: undefined;
+  ForgotPassword: undefined;
 };
 
 export type TrainStackParamList = {
@@ -26,6 +27,7 @@ export type RootTabParamList = {
 
 export type LoginProps = NativeStackScreenProps<AuthStackParamList, 'Login'>;
 export type RegisterProps = NativeStackScreenProps<AuthStackParamList, 'Register'>;
+export type ForgotPasswordProps = NativeStackScreenProps<AuthStackParamList, 'ForgotPassword'>;
 export type TrainHomeProps = NativeStackScreenProps<TrainStackParamList, 'TrainHome'>;
 export type PlannedWorkoutProps = NativeStackScreenProps<TrainStackParamList, 'PlannedWorkout'>;
 export type FreeFormWorkoutProps = NativeStackScreenProps<TrainStackParamList, 'FreeFormWorkout'>;
