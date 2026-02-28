@@ -1,5 +1,6 @@
 import { executeSql } from '../db/database';
 import { deriveCaps, type PolicyCaps } from '../state/evaluationEngine';
+import type { PenaltyItem } from '../types/api';
 
 export interface ParsedCaps {
   maxRpe: number;
@@ -13,6 +14,9 @@ export interface EvaluationData {
   band: string | null;
   caps: ParsedCaps | null;
   timestamp: number | null;
+  penalties: PenaltyItem[];
+  rawMetrics: Record<string, unknown>;
+  source: 'server' | 'local';
 }
 
 export async function getMeta(key: string): Promise<string | null> {
@@ -47,15 +51,23 @@ export async function getEvaluationSnapshot(): Promise<EvaluationData> {
     'last_adaptation_score',
     'last_risk_band',
     'last_evaluation_timestamp',
+    'last_penalties_json',
+    'last_raw_metrics_json',
+    'last_evaluation_source',
   ];
 
   const [result] = await executeSql(
-    `SELECT key, value FROM meta_state WHERE key IN (?, ?, ?);`,
+    `SELECT key, value FROM meta_state WHERE key IN (?, ?, ?, ?, ?, ?);`,
     keys
   );
 
+  const emptyResult: EvaluationData = {
+    score: null, band: null, caps: null, timestamp: null,
+    penalties: [], rawMetrics: {}, source: 'local',
+  };
+
   if (result.rows.length === 0) {
-    return { score: null, band: null, caps: null, timestamp: null };
+    return emptyResult;
   }
 
   const map: Record<string, string> = {};
@@ -69,12 +81,28 @@ export async function getEvaluationSnapshot(): Promise<EvaluationData> {
   const tsRaw = map.last_evaluation_timestamp;
 
   if (!scoreRaw || !band) {
-    return { score: null, band: null, caps: null, timestamp: null };
+    return emptyResult;
   }
 
   const score = Math.round(parseFloat(scoreRaw));
   const timestamp = tsRaw ? parseInt(tsRaw, 10) : null;
   const caps = toParsedCaps(deriveCaps(band));
 
-  return { score, band, caps, timestamp };
+  let penalties: PenaltyItem[] = [];
+  try {
+    penalties = map.last_penalties_json ? JSON.parse(map.last_penalties_json) : [];
+  } catch {
+    penalties = [];
+  }
+
+  let rawMetrics: Record<string, unknown> = {};
+  try {
+    rawMetrics = map.last_raw_metrics_json ? JSON.parse(map.last_raw_metrics_json) : {};
+  } catch {
+    rawMetrics = {};
+  }
+
+  const source: 'server' | 'local' = map.last_evaluation_source === 'server' ? 'server' : 'local';
+
+  return { score, band, caps, timestamp, penalties, rawMetrics, source };
 }

@@ -26,11 +26,20 @@ export interface AuthoritativeExerciseSet {
   cap_override: boolean;
 }
 
+export interface PenaltyItem {
+  category: string;
+  points: number;
+  reason: string;
+  metric_key: string;
+}
+
 export interface AuthoritativePolicySnapshot {
   projected_adaptation_score: number;
   risk_band: string;
   policy_caps: Record<string, unknown>;
   policy_reasons: string[];
+  penalties?: PenaltyItem[];
+  raw_metrics?: Record<string, unknown>;
 }
 
 export interface AuthoritativeState {

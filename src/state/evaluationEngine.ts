@@ -198,6 +198,9 @@ async function persistSnapshot(snapshot: EvaluationSnapshot): Promise<void> {
     ['last_adaptation_score', String(snapshot.adaptation_score)],
     ['last_risk_band', snapshot.risk_band],
     ['last_caps_hash', snapshot.caps_hash],
+    ['last_evaluation_source', 'local'],
+    ['last_penalties_json', '[]'],
+    ['last_raw_metrics_json', '{}'],
   ];
 
   for (const [key, value] of pairs) {

@@ -147,6 +147,30 @@ export async function applyAuthoritativeState(
       ]
     );
 
+    // Persist penalty data and score to meta_state for dashboard
+    if (ps.penalties && ps.penalties.length > 0) {
+      await executeSql(
+        `INSERT OR REPLACE INTO meta_state (key, value) VALUES (?, ?);`,
+        ['last_penalties_json', JSON.stringify(ps.penalties)]
+      );
+      await executeSql(
+        `INSERT OR REPLACE INTO meta_state (key, value) VALUES (?, ?);`,
+        ['last_raw_metrics_json', JSON.stringify(ps.raw_metrics || {})]
+      );
+      await executeSql(
+        `INSERT OR REPLACE INTO meta_state (key, value) VALUES (?, ?);`,
+        ['last_evaluation_source', 'server']
+      );
+    }
+    await executeSql(
+      `INSERT OR REPLACE INTO meta_state (key, value) VALUES (?, ?);`,
+      ['last_adaptation_score', String(ps.projected_adaptation_score)]
+    );
+    await executeSql(
+      `INSERT OR REPLACE INTO meta_state (key, value) VALUES (?, ?);`,
+      ['last_risk_band', ps.risk_band]
+    );
+
     await executeSql('COMMIT;');
   } catch (e) {
     await executeSql('ROLLBACK;');
