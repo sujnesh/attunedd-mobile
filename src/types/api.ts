@@ -131,6 +131,34 @@ export interface CurrentPlanResponse {
   week: PlanDayData[];
 }
 
+export interface WorkoutHistorySet {
+  exercise_name: string;
+  set_number: number;
+  weight: number | null;
+  reps: number | null;
+  rpe: number | null;
+  stress_units: number | null;
+  cap_override: boolean;
+}
+
+export interface WorkoutHistoryEntry {
+  id: number;
+  status: string;
+  coaching_mode: string | null;
+  actual_stress: number | null;
+  allowed_stress: number | null;
+  started_at: string | null;
+  completed_at: string | null;
+  risk_band: string | null;
+  exercise_sets: WorkoutHistorySet[];
+}
+
+export interface WorkoutHistoryResponse {
+  workouts: WorkoutHistoryEntry[];
+  page: number;
+  has_more: boolean;
+}
+
 export interface SyncResponse {
   status: 'accepted' | 'rejected' | 'stale_client' | 'error';
   authoritative_state: AuthoritativeState;

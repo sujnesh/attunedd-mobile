@@ -155,6 +155,12 @@ export default function TrainHomeScreen({ navigation }: TrainHomeProps) {
         </Pressable>
       </View>
 
+      <Pressable
+        style={styles.historyLink}
+        onPress={() => navigation.navigate('WorkoutHistory')}>
+        <Text style={styles.historyText}>VIEW HISTORY</Text>
+      </Pressable>
+
       {starting && <Text style={styles.status}>STARTING...</Text>}
     </ScrollView>
   );
@@ -341,6 +347,17 @@ const styles = StyleSheet.create({
     color: '#555555',
     fontSize: 11,
     marginTop: 6,
+  },
+  historyLink: {
+    marginTop: 24,
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  historyText: {
+    color: '#555555',
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 2,
   },
   status: {
     color: '#555555',
