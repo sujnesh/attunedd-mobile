@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import {
@@ -8,6 +8,12 @@ import {
   type ReadinessState,
 } from '../services/readinessService';
 import type { ParsedCaps } from '../services/metaStateService';
+import {
+  buildExplanation,
+  type ExplanationOutput,
+  type PenaltyRow,
+  type LimitRow,
+} from '../services/explanationEngine';
 
 const BAND_COLORS: Record<string, string> = {
   green: '#2ECC71',
@@ -76,12 +82,30 @@ export default function DashboardScreen() {
   const accent = BAND_COLORS[data.band] ?? '#888888';
   const bandLabel = BAND_LABELS[data.band] ?? data.band.toUpperCase();
 
+  const explanation = buildExplanation({
+    score: data.score,
+    band: data.band,
+    penalties: data.penalties,
+    rawMetrics: data.rawMetrics,
+    caps: data.caps,
+  });
+
   return (
-    <View style={[styles.root, { paddingTop: insets.top + 40 }]}>
+    <ScrollView
+      style={styles.scrollRoot}
+      contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 32 }]}
+    >
       <Text style={[styles.score, { color: accent }]}>{data.score}</Text>
       <Text style={[styles.bandLabel, { color: accent }]}>{bandLabel}</Text>
+      <Text style={styles.decisionLine}>{explanation.decisionLine}</Text>
 
-      <CapsGrid caps={data.caps} />
+      {explanation.hasServerData ? (
+        <WhyTodaySection explanation={explanation} score={data.score} />
+      ) : data.source === 'local' ? (
+        <Text style={styles.syncHint}>Full analysis available after sync</Text>
+      ) : null}
+
+      <SessionLimitsSection limits={explanation.sessionLimits} />
 
       <Text style={styles.timestamp}>{formatTimestamp(data.timestamp)}</Text>
 
@@ -93,29 +117,49 @@ export default function DashboardScreen() {
           {refreshing ? 'REFRESHING' : 'REFRESH'}
         </Text>
       </Pressable>
+    </ScrollView>
+  );
+}
+
+function WhyTodaySection({ explanation, score }: { explanation: ExplanationOutput; score: number }) {
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionHeader}>WHY TODAY</Text>
+      {explanation.penaltyBreakdown.map((row, i) => (
+        <PenaltyRowView key={i} row={row} />
+      ))}
+      <Text style={styles.totalLine}>
+        (total: -{explanation.totalDeducted} from 100)
+      </Text>
     </View>
   );
 }
 
-function CapsGrid({ caps }: { caps: ParsedCaps }) {
+function PenaltyRowView({ row }: { row: PenaltyRow }) {
   return (
-    <View style={styles.capsBlock}>
-      <CapsRow label="MAX RPE" value={String(caps.maxRpe)} />
-      <CapsRow label="STRESS %" value={`${caps.maxStressPct}%`} />
-      <CapsRow
-        label="HEAVY NEURAL"
-        value={caps.blockHeavyNeural ? 'BLOCKED' : 'ALLOWED'}
-      />
-      <CapsRow label="MAX ZONE" value={String(caps.maxCardioZone)} />
+    <View style={styles.penaltyRow}>
+      <View style={styles.penaltyHeader}>
+        <Text style={styles.penaltyIcon}>{row.icon}</Text>
+        <Text style={styles.penaltyCategory}>{row.category}</Text>
+        <Text style={styles.penaltyPoints}>-{row.points}</Text>
+      </View>
+      <Text style={styles.penaltyDescription}>{row.description}</Text>
     </View>
   );
 }
 
-function CapsRow({ label, value }: { label: string; value: string }) {
+function SessionLimitsSection({ limits }: { limits: LimitRow[] }) {
   return (
-    <View style={styles.capsRow}>
-      <Text style={styles.capsLabel}>{label}</Text>
-      <Text style={styles.capsValue}>{value}</Text>
+    <View style={styles.section}>
+      <Text style={styles.sectionHeader}>SESSION LIMITS</Text>
+      {limits.map((limit, i) => (
+        <View key={i} style={styles.capsRow}>
+          <Text style={styles.capsLabel}>{limit.label}</Text>
+          <Text style={[styles.capsValue, limit.restricted && styles.capsRestricted]}>
+            {limit.value}
+          </Text>
+        </View>
+      ))}
     </View>
   );
 }
@@ -123,6 +167,14 @@ function CapsRow({ label, value }: { label: string; value: string }) {
 const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
 
 const styles = StyleSheet.create({
+  scrollRoot: {
+    flex: 1,
+    backgroundColor: '#0A0A0A',
+  },
+  scrollContent: {
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
   root: {
     flex: 1,
     backgroundColor: '#0A0A0A',
@@ -147,13 +199,76 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     letterSpacing: 4,
-    marginBottom: 48,
+    marginBottom: 12,
   },
-  capsBlock: {
+  decisionLine: {
+    color: '#CCCCCC',
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 32,
+    paddingHorizontal: 16,
+  },
+  syncHint: {
+    color: '#555555',
+    fontSize: 12,
+    fontFamily: MONO,
+    textAlign: 'center',
+    marginBottom: 24,
+    letterSpacing: 1,
+  },
+  section: {
     width: '100%',
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: '#222222',
-    paddingTop: 24,
+    paddingTop: 20,
+    marginBottom: 8,
+  },
+  sectionHeader: {
+    color: '#555555',
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 3,
+    marginBottom: 16,
+  },
+  penaltyRow: {
+    marginBottom: 16,
+  },
+  penaltyHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  penaltyIcon: {
+    color: '#888888',
+    fontSize: 14,
+    width: 20,
+  },
+  penaltyCategory: {
+    color: '#EAEAEA',
+    fontSize: 13,
+    fontWeight: '500',
+    flex: 1,
+  },
+  penaltyPoints: {
+    color: '#E74C3C',
+    fontSize: 13,
+    fontWeight: '600',
+    fontFamily: MONO,
+  },
+  penaltyDescription: {
+    color: '#888888',
+    fontSize: 12,
+    marginLeft: 20,
+    lineHeight: 16,
+  },
+  totalLine: {
+    color: '#555555',
+    fontSize: 11,
+    fontFamily: MONO,
+    textAlign: 'center',
+    marginTop: 8,
+    marginBottom: 8,
   },
   capsRow: {
     flexDirection: 'row',
@@ -172,15 +287,18 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     fontFamily: MONO,
   },
+  capsRestricted: {
+    color: '#F1C40F',
+  },
   timestamp: {
     color: '#888888',
     fontSize: 11,
     fontFamily: MONO,
-    marginTop: 48,
+    marginTop: 32,
     letterSpacing: 1,
   },
   refreshButton: {
-    marginTop: 32,
+    marginTop: 24,
     paddingVertical: 8,
     paddingHorizontal: 24,
   },
