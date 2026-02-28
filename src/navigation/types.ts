@@ -2,10 +2,15 @@ import type { NavigatorScreenParams } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 
+export type AuthStackParamList = {
+  Login: undefined;
+  Register: undefined;
+};
+
 export type TrainStackParamList = {
   TrainHome: undefined;
-  ActiveWorkout: { workoutId: number; mobileLocalId: string };
-  FreeFormWorkout: { workoutId: number; mobileLocalId: string };
+  PlannedWorkout: { draftId: number };
+  FreeFormWorkout: { draftId: number };
 };
 
 export type RootTabParamList = {
@@ -15,8 +20,10 @@ export type RootTabParamList = {
   Sync: undefined;
 };
 
+export type LoginProps = NativeStackScreenProps<AuthStackParamList, 'Login'>;
+export type RegisterProps = NativeStackScreenProps<AuthStackParamList, 'Register'>;
 export type TrainHomeProps = NativeStackScreenProps<TrainStackParamList, 'TrainHome'>;
-export type ActiveWorkoutProps = NativeStackScreenProps<TrainStackParamList, 'ActiveWorkout'>;
+export type PlannedWorkoutProps = NativeStackScreenProps<TrainStackParamList, 'PlannedWorkout'>;
 export type FreeFormWorkoutProps = NativeStackScreenProps<TrainStackParamList, 'FreeFormWorkout'>;
 export type DashboardTabProps = BottomTabScreenProps<RootTabParamList, 'Dashboard'>;
 export type HealthTabProps = BottomTabScreenProps<RootTabParamList, 'Health'>;
