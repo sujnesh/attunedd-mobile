@@ -1,11 +1,12 @@
 import React, { useCallback, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { getSyncStatus, type SyncStatus } from '../services/syncStatusService';
 import { flushQueue, type FlushResult } from '../sync/syncEngine';
 import { clearFailedEvents } from '../sync/eventQueue';
 import { getMeta } from '../services/metaStateService';
+import { logout } from '../navigation/AppNavigator';
 
 const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
 
@@ -98,6 +99,17 @@ export default function SyncScreen() {
             </Text>
           </Pressable>
         )}
+
+        <Pressable
+          style={({ pressed }) => [styles.actionBtn, styles.dangerBtn, pressed && styles.pressed]}
+          onPress={() =>
+            Alert.alert('Log Out', 'Are you sure you want to log out?', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Log Out', style: 'destructive', onPress: logout },
+            ])
+          }>
+          <Text style={[styles.actionText, styles.dangerText]}>LOG OUT</Text>
+        </Pressable>
       </View>
     </View>
   );

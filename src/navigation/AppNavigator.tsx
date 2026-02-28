@@ -11,6 +11,7 @@ import SyncScreen from '../screens/SyncScreen';
 import LoginScreen from '../screens/LoginScreen';
 import RegisterScreen from '../screens/RegisterScreen';
 import { getMeta, setMeta } from '../services/metaStateService';
+import { API_BASE_URL } from '../config';
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
@@ -94,5 +95,16 @@ export default function AppNavigator() {
 }
 
 export async function logout() {
+  const token = await getMeta('auth_token');
+  if (token) {
+    try {
+      await fetch(`${API_BASE_URL}/api/auth/logout`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch {
+      // Server unreachable — still clear local token
+    }
+  }
   await setMeta('auth_token', '');
 }
