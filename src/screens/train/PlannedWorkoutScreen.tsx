@@ -16,11 +16,11 @@ import { parseSetInput } from '../../services/setParser';
 import { useActiveWorkout } from '../../workout/controller/useActiveWorkout';
 import type { Deviation } from '../../workout/core/deviationEngine';
 import type { SessionSet } from '../../workout/core/sessionState';
-import type { FreeFormWorkoutProps } from '../../navigation/types';
+import type { PlannedWorkoutProps } from '../../navigation/types';
 
 const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
 
-export default function FreeFormWorkoutScreen({ route, navigation }: FreeFormWorkoutProps) {
+export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorkoutProps) {
   const { draftId } = route.params;
   const insets = useSafeAreaInsets();
   const {
@@ -45,7 +45,7 @@ export default function FreeFormWorkoutScreen({ route, navigation }: FreeFormWor
   } | null>(null);
 
   useEffect(() => {
-    initSession('free_form', draftId);
+    initSession('planned', draftId);
   }, [draftId, initSession]);
 
   const handleSubmit = async () => {
@@ -126,7 +126,7 @@ export default function FreeFormWorkoutScreen({ route, navigation }: FreeFormWor
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={0}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>FREE FORM</Text>
+        <Text style={styles.headerTitle}>PLANNED SESSION</Text>
         <View style={styles.stressRow}>
           <Text style={styles.stressValue}>
             {Math.round(session.cumulativeStress)}
@@ -177,7 +177,7 @@ export default function FreeFormWorkoutScreen({ route, navigation }: FreeFormWor
           </View>
         ))}
         {exercises.length === 0 && (
-          <Text style={styles.emptyHint}>Add exercises freely{'\n'}e.g. curl 25x12@6</Text>
+          <Text style={styles.emptyHint}>Log sets below{'\n'}e.g. bench press 135x5@8</Text>
         )}
       </ScrollView>
 
@@ -200,7 +200,7 @@ export default function FreeFormWorkoutScreen({ route, navigation }: FreeFormWor
           style={styles.input}
           value={input}
           onChangeText={setInput}
-          placeholder="curl 25x12@6"
+          placeholder="bench press 135x5@8"
           placeholderTextColor="#444444"
           autoCapitalize="none"
           autoCorrect={false}

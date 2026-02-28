@@ -2,8 +2,9 @@ import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { TrainStackParamList } from './types';
 import TrainHomeScreen from '../screens/train/TrainHomeScreen';
-import ActiveWorkoutScreen from '../screens/train/ActiveWorkoutScreen';
+import PlannedWorkoutScreen from '../screens/train/PlannedWorkoutScreen';
 import FreeFormWorkoutScreen from '../screens/train/FreeFormWorkoutScreen';
+import PostWorkoutDebriefScreen from '../screens/train/PostWorkoutDebriefScreen';
 
 const Stack = createNativeStackNavigator<TrainStackParamList>();
 
@@ -16,8 +17,9 @@ export default function TrainStack() {
         animation: 'slide_from_right',
       }}>
       <Stack.Screen name="TrainHome" component={TrainHomeScreen} />
-      <Stack.Screen name="ActiveWorkout" component={ActiveWorkoutScreen} />
+      <Stack.Screen name="PlannedWorkout" component={PlannedWorkoutScreen} />
       <Stack.Screen name="FreeFormWorkout" component={FreeFormWorkoutScreen} />
+      <Stack.Screen name="PostWorkoutDebrief" component={PostWorkoutDebriefScreen} />
     </Stack.Navigator>
   );
 }
