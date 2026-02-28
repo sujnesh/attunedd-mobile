@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -10,6 +10,7 @@ import HealthScreen from '../screens/HealthScreen';
 import SyncScreen from '../screens/SyncScreen';
 import LoginScreen from '../screens/LoginScreen';
 import RegisterScreen from '../screens/RegisterScreen';
+import OnboardingScreen from '../screens/OnboardingScreen';
 import { getMeta, setMeta } from '../services/metaStateService';
 import { onAuthChange, emitAuthChange } from '../services/authEvents';
 import { API_BASE_URL } from '../config';
@@ -69,19 +70,25 @@ function MainTabs() {
 
 export default function AppNavigator() {
   const [authToken, setAuthToken] = useState<string | null>(null);
+  const [hasPreferences, setHasPreferences] = useState(false);
   const [checking, setChecking] = useState(true);
 
-  useEffect(() => {
-    getMeta('auth_token').then(token => {
-      setAuthToken(token);
-      setChecking(false);
-    });
+  const loadState = useCallback(async () => {
+    const token = await getMeta('auth_token');
+    const prefs = await getMeta('has_preferences');
+    setAuthToken(token);
+    setHasPreferences(prefs === 'true');
+    setChecking(false);
+  }, []);
 
-    const unsubscribe = onAuthChange(token => {
-      setAuthToken(token);
+  useEffect(() => {
+    loadState();
+
+    const unsubscribe = onAuthChange(() => {
+      loadState();
     });
     return unsubscribe;
-  }, []);
+  }, [loadState]);
 
   if (checking) {
     return null;
@@ -89,13 +96,26 @@ export default function AppNavigator() {
 
   return (
     <NavigationContainer>
-      {authToken ? <MainTabs /> : <AuthNavigator />}
+      {!authToken ? (
+        <AuthNavigator />
+      ) : !hasPreferences ? (
+        <OnboardingScreen />
+      ) : (
+        <MainTabs />
+      )}
     </NavigationContainer>
   );
 }
 
-export async function login(token: string) {
+export async function login(token: string, hasPreferences: boolean) {
   await setMeta('auth_token', token);
+  await setMeta('has_preferences', hasPreferences ? 'true' : 'false');
+  emitAuthChange(token);
+}
+
+export async function completeOnboarding() {
+  await setMeta('has_preferences', 'true');
+  const token = await getMeta('auth_token');
   emitAuthChange(token);
 }
 
@@ -112,5 +132,6 @@ export async function logout() {
     }
   }
   await setMeta('auth_token', '');
+  await setMeta('has_preferences', 'false');
   emitAuthChange(null);
 }

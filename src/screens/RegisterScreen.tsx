@@ -47,7 +47,7 @@ export default function RegisterScreen({ navigation }: Props) {
       const body = await response.json();
 
       if (response.ok) {
-        await login(body.api_token);
+        await login(body.api_token, body.has_preferences ?? false);
       } else {
         const message = body.errors?.join('\n') || 'Registration failed';
         Alert.alert('Registration Failed', message);

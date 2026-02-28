@@ -37,7 +37,7 @@ export default function LoginScreen({ navigation }: Props) {
       const body = await response.json();
 
       if (response.ok) {
-        await login(body.api_token);
+        await login(body.api_token, body.has_preferences ?? false);
       } else {
         Alert.alert('Login Failed', body.error || 'Invalid credentials');
       }
