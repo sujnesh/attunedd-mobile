@@ -10,20 +10,25 @@ export async function runMigrations(db: SQLiteDatabase): Promise<void> {
 
   if (currentVersion === 0) {
     // Fresh install — create all tables
-    await db.transaction(async (tx) => {
+    await db.executeSql('BEGIN TRANSACTION;');
+    try {
       for (const ddl of ALL_TABLES) {
-        await tx.executeSql(ddl);
+        await db.executeSql(ddl);
       }
 
       for (const idx of CREATE_INDEXES) {
-        await tx.executeSql(idx);
+        await db.executeSql(idx);
       }
 
-      await tx.executeSql(
+      await db.executeSql(
         `INSERT OR REPLACE INTO meta_state (key, value) VALUES ('schema_version', ?);`,
         [String(SCHEMA_VERSION)]
       );
-    });
+      await db.executeSql('COMMIT;');
+    } catch (e) {
+      await db.executeSql('ROLLBACK;');
+      throw e;
+    }
     return;
   }
 
@@ -38,11 +43,11 @@ export async function runMigrations(db: SQLiteDatabase): Promise<void> {
 }
 
 async function migrateV1toV2(db: SQLiteDatabase): Promise<void> {
-  await db.transaction(async (tx) => {
-    // Drop old external_activities and recreate with new schema
-    await tx.executeSql(`DROP TABLE IF EXISTS external_activities;`);
+  await db.executeSql('BEGIN TRANSACTION;');
+  try {
+    await db.executeSql(`DROP TABLE IF EXISTS external_activities;`);
 
-    await tx.executeSql(`
+    await db.executeSql(`
       CREATE TABLE IF NOT EXISTS external_activities (
         local_id INTEGER PRIMARY KEY AUTOINCREMENT,
         server_id TEXT,
@@ -61,35 +66,44 @@ async function migrateV1toV2(db: SQLiteDatabase): Promise<void> {
       );
     `);
 
-    await tx.executeSql(
+    await db.executeSql(
       `CREATE INDEX IF NOT EXISTS idx_external_activities_hash ON external_activities(activity_hash);`
     );
-    await tx.executeSql(
+    await db.executeSql(
       `CREATE INDEX IF NOT EXISTS idx_external_activities_synced ON external_activities(synced_flag);`
     );
 
-    await tx.executeSql(
+    await db.executeSql(
       `INSERT OR REPLACE INTO meta_state (key, value) VALUES ('schema_version', ?);`,
       [String(2)]
     );
-  });
+    await db.executeSql('COMMIT;');
+  } catch (e) {
+    await db.executeSql('ROLLBACK;');
+    throw e;
+  }
 }
 
 async function migrateV2toV3(db: SQLiteDatabase): Promise<void> {
-  await db.transaction(async (tx) => {
-    await tx.executeSql(
+  await db.executeSql('BEGIN TRANSACTION;');
+  try {
+    await db.executeSql(
       `ALTER TABLE sync_queue ADD COLUMN external_activity_hash TEXT;`
     );
 
-    await tx.executeSql(
+    await db.executeSql(
       `CREATE INDEX IF NOT EXISTS idx_sync_queue_activity_hash ON sync_queue(external_activity_hash);`
     );
 
-    await tx.executeSql(
+    await db.executeSql(
       `INSERT OR REPLACE INTO meta_state (key, value) VALUES ('schema_version', ?);`,
       [String(3)]
     );
-  });
+    await db.executeSql('COMMIT;');
+  } catch (e) {
+    await db.executeSql('ROLLBACK;');
+    throw e;
+  }
 }
 
 async function getSchemaVersion(db: SQLiteDatabase): Promise<number> {
