@@ -11,12 +11,14 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { parseSetInput } from '../../services/setParser';
+import { parseSetInput, isParseError, formatSetDisplay, rpeToRir } from '../../services/setParser';
 import { useActiveWorkout } from '../../workout/controller/useActiveWorkout';
 import type { Deviation } from '../../workout/core/deviationEngine';
 import type { SessionSet } from '../../workout/core/sessionState';
 import type { FreeFormWorkoutProps } from '../../navigation/types';
 import { useSessionTimer } from '../../workout/hooks/useSessionTimer';
+import { generateSetFeedback } from '../../workout/core/coachingEngine';
+import FeedbackToast from '../../components/FeedbackToast';
 
 const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
 
@@ -33,12 +35,16 @@ export default function FreeFormWorkoutScreen({ route, navigation }: FreeFormWor
     submitSet,
     confirmOverride,
     undoLastSet,
+    editSet,
+    deleteSet,
     finishSession,
   } = useActiveWorkout();
 
   const inputRef = useRef<TextInput>(null);
+  const scrollRef = useRef<ScrollView>(null);
   const timer = useSessionTimer(session?.startedAt ?? null);
   const [input, setInput] = useState('');
+  const [parseError, setParseError] = useState<string | null>(null);
   const [deviation, setDeviation] = useState<Deviation | null>(null);
   const [pendingParsed, setPendingParsed] = useState<{
     exerciseName: string;
@@ -46,25 +52,55 @@ export default function FreeFormWorkoutScreen({ route, navigation }: FreeFormWor
     reps: number;
     rpe: number;
   } | null>(null);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editInput, setEditInput] = useState('');
+  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
+  const [feedbackType, setFeedbackType] = useState<'info' | 'warning'>('info');
 
   useEffect(() => {
     initSession('free_form', draftId);
   }, [draftId, initSession]);
 
-  const handleSubmit = async () => {
-    const parsed = parseSetInput(input.trim());
-    if (!parsed) return;
+  // Auto-dismiss parse errors after 3s
+  useEffect(() => {
+    if (parseError) {
+      const timer = setTimeout(() => setParseError(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [parseError]);
 
-    const dev = await submitSet(parsed.exerciseName, parsed.weight, parsed.reps, parsed.rpe);
+  const handleSubmit = async () => {
+    const result = parseSetInput(input.trim());
+    if (isParseError(result)) {
+      setParseError(result.error);
+      return;
+    }
+
+    setParseError(null);
+    const dev = await submitSet(result.exerciseName, result.weight, result.reps, result.rpe);
     if (dev) {
       setDeviation(dev);
-      setPendingParsed(parsed);
+      setPendingParsed(result);
       return;
     }
 
     setInput('');
     setDeviation(null);
     setPendingParsed(null);
+
+    // Show coaching feedback
+    if (session) {
+      const feedback = generateSetFeedback(session, {
+        exerciseName: result.exerciseName,
+        weight: result.weight,
+        reps: result.reps,
+        rpe: result.rpe,
+      });
+      if (feedback) {
+        setFeedbackMessage(feedback.message);
+        setFeedbackType(feedback.type);
+      }
+    }
   };
 
   const handleOverride = async () => {
@@ -84,6 +120,42 @@ export default function FreeFormWorkoutScreen({ route, navigation }: FreeFormWor
   const handleDismiss = () => {
     setDeviation(null);
     setPendingParsed(null);
+  };
+
+  const handleSetTap = (globalIndex: number, set: SessionSet) => {
+    const rir = rpeToRir(set.rpe);
+    const weightPart = set.weight != null ? `${set.weight}x` : '';
+    setEditInput(`${set.exerciseName} ${weightPart}${set.reps} r${rir}`);
+    setEditingIndex(globalIndex);
+  };
+
+  const handleEditSave = async () => {
+    if (editingIndex == null) return;
+    const result = parseSetInput(editInput.trim());
+    if (isParseError(result)) {
+      setParseError(result.error);
+      return;
+    }
+    setParseError(null);
+    await editSet(editingIndex, result.exerciseName, result.weight, result.reps, result.rpe);
+    setEditingIndex(null);
+    setEditInput('');
+  };
+
+  const handleEditCancel = () => {
+    setEditingIndex(null);
+    setEditInput('');
+  };
+
+  const handleSetLongPress = (globalIndex: number) => {
+    Alert.alert(
+      'Delete this set?',
+      'This will remove the set and recalculate stress.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => deleteSet(globalIndex) },
+      ],
+    );
   };
 
   const handleFinish = () => {
@@ -119,7 +191,15 @@ export default function FreeFormWorkoutScreen({ route, navigation }: FreeFormWor
     ? Math.round((session.cumulativeStress / session.allowedStress) * 100)
     : null;
 
+  const rirCap = rpeToRir(session.caps.max_rpe);
   const exercises = groupByExercise(session.sets);
+
+  // Build global index map for tap-to-edit
+  let globalIdx = 0;
+  const exercisesWithGlobalIdx = exercises.map(([name, sets]) => {
+    const withIdx = sets.map((s) => ({ ...s, globalIndex: globalIdx++ }));
+    return [name, withIdx] as [string, (SessionSet & { globalIndex: number })[]];
+  });
 
   return (
     <KeyboardAvoidingView
@@ -145,7 +225,7 @@ export default function FreeFormWorkoutScreen({ route, navigation }: FreeFormWor
           )}
         </View>
         <View style={styles.capsRow}>
-          <Text style={styles.capChip}>RPE {session.caps.max_rpe}</Text>
+          <Text style={styles.capChip}>RIR {rirCap}</Text>
           <Text style={styles.capChip}>{session.caps.max_allowed_stress_pct}%</Text>
           {session.caps.block_heavy_neural && (
             <Text style={[styles.capChip, styles.capAlert]}>NO HEAVY</Text>
@@ -159,8 +239,11 @@ export default function FreeFormWorkoutScreen({ route, navigation }: FreeFormWor
         </View>
       )}
 
-      <ScrollView style={styles.setList} keyboardShouldPersistTaps="handled">
-        {exercises.map(([name, sets]) => (
+      <ScrollView
+        ref={scrollRef}
+        style={styles.setList}
+        keyboardShouldPersistTaps="handled">
+        {exercisesWithGlobalIdx.map(([name, sets]) => (
           <View key={name} style={styles.exerciseBlock}>
             <View style={styles.exerciseHeader}>
               <Text style={styles.exerciseName}>{name.toUpperCase()}</Text>
@@ -168,22 +251,69 @@ export default function FreeFormWorkoutScreen({ route, navigation }: FreeFormWor
                 <Text style={styles.fatigueTag}>FATIGUE</Text>
               )}
             </View>
-            {sets.map((s, i) => (
-              <View key={i} style={styles.setRow}>
+            {sets.map((s) => (
+              <Pressable
+                key={s.globalIndex}
+                onPress={() => handleSetTap(s.globalIndex, s)}
+                onLongPress={() => handleSetLongPress(s.globalIndex)}
+                style={styles.setRow}>
                 <Text style={styles.setNum}>#{s.setNumber}</Text>
                 <Text style={styles.setText}>
-                  {s.weight != null ? `${s.weight}x` : ''}{s.reps}@{s.rpe}
+                  {formatSetDisplay(s.weight, s.reps, s.rpe)}
                 </Text>
                 <Text style={styles.setStress}>{Math.round(s.stressUnits)}</Text>
                 {s.capOverride && <Text style={styles.overrideTag}>OVR</Text>}
-              </View>
+              </Pressable>
             ))}
           </View>
         ))}
         {exercises.length === 0 && (
-          <Text style={styles.emptyHint}>Add exercises freely{'\n'}e.g. curl 25x12@6</Text>
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyHint}>bench press 80x8 r2</Text>
+            <Text style={styles.emptySubtext}>r2 = could do 2 more reps</Text>
+          </View>
+        )}
+
+        {/* FINISH WORKOUT button at bottom of scroll content */}
+        {session.sets.length > 0 && (
+          <Pressable
+            onPress={handleFinish}
+            style={({ pressed }) => [
+              styles.finishWorkoutBtn,
+              pressed && styles.finishWorkoutBtnPressed,
+            ]}
+            disabled={finishing}>
+            <Text style={styles.finishWorkoutText}>
+              {finishing ? 'FINISHING...' : 'FINISH WORKOUT'}
+            </Text>
+          </Pressable>
         )}
       </ScrollView>
+
+      {/* Edit modal inline */}
+      {editingIndex != null && (
+        <View style={styles.editBar}>
+          <Text style={styles.editLabel}>EDIT SET</Text>
+          <TextInput
+            style={styles.editInput}
+            value={editInput}
+            onChangeText={setEditInput}
+            autoFocus
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="done"
+            onSubmitEditing={handleEditSave}
+          />
+          <View style={styles.editActions}>
+            <Pressable onPress={handleEditSave} style={styles.editBtn}>
+              <Text style={styles.editSaveText}>SAVE</Text>
+            </Pressable>
+            <Pressable onPress={handleEditCancel} style={styles.editBtn}>
+              <Text style={styles.editCancelText}>CANCEL</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
 
       {deviation && (
         <View style={styles.warningBar}>
@@ -199,13 +329,29 @@ export default function FreeFormWorkoutScreen({ route, navigation }: FreeFormWor
         </View>
       )}
 
+      <FeedbackToast
+        message={feedbackMessage}
+        type={feedbackType}
+        onDismiss={() => setFeedbackMessage(null)}
+      />
+
+      {/* Parse error display */}
+      {parseError && (
+        <View style={styles.parseErrorBar}>
+          <Text style={styles.parseErrorText}>{parseError}</Text>
+        </View>
+      )}
+
       <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, 8) }]}>
         <TextInput
           ref={inputRef}
           style={styles.input}
           value={input}
-          onChangeText={setInput}
-          placeholder="curl 25x12@6"
+          onChangeText={(text) => {
+            setInput(text);
+            if (parseError) setParseError(null);
+          }}
+          placeholder="bench press 80x8 r2"
           placeholderTextColor="#444444"
           autoCapitalize="none"
           autoCorrect={false}
@@ -220,14 +366,6 @@ export default function FreeFormWorkoutScreen({ route, navigation }: FreeFormWor
         )}
         <Pressable onPress={handleSubmit} style={styles.sendBtn}>
           <Text style={styles.sendText}>LOG</Text>
-        </Pressable>
-        <Pressable
-          onPress={handleFinish}
-          style={styles.finishBtn}
-          disabled={finishing}>
-          <Text style={styles.finishText}>
-            {finishing ? '...' : 'DONE'}
-          </Text>
         </Pressable>
       </View>
     </KeyboardAvoidingView>
@@ -364,7 +502,7 @@ const styles = StyleSheet.create({
   setRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 4,
+    paddingVertical: 6,
     gap: 12,
   },
   setNum: {
@@ -392,13 +530,85 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 1,
   },
+  emptyContainer: {
+    marginTop: 80,
+    alignItems: 'center',
+  },
   emptyHint: {
-    color: '#333333',
+    color: '#444444',
     fontSize: 13,
     textAlign: 'center',
-    marginTop: 80,
-    lineHeight: 22,
     fontFamily: MONO,
+    marginBottom: 4,
+  },
+  emptySubtext: {
+    color: '#333333',
+    fontSize: 11,
+    textAlign: 'center',
+    fontFamily: MONO,
+  },
+  finishWorkoutBtn: {
+    marginTop: 24,
+    marginBottom: 16,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#EAEAEA',
+  },
+  finishWorkoutBtnPressed: {
+    backgroundColor: '#1A1A1A',
+  },
+  finishWorkoutText: {
+    color: '#EAEAEA',
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 3,
+    fontFamily: MONO,
+  },
+  editBar: {
+    backgroundColor: '#111122',
+    borderTopWidth: 0.5,
+    borderTopColor: '#333366',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  editLabel: {
+    color: '#8888CC',
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 2,
+    marginBottom: 6,
+  },
+  editInput: {
+    color: '#EAEAEA',
+    fontSize: 14,
+    fontFamily: MONO,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#151515',
+    borderWidth: 0.5,
+    borderColor: '#333366',
+    marginBottom: 8,
+  },
+  editActions: {
+    flexDirection: 'row',
+    gap: 16,
+  },
+  editBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  editSaveText: {
+    color: '#2ECC71',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 2,
+  },
+  editCancelText: {
+    color: '#555555',
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 2,
   },
   warningBar: {
     backgroundColor: '#1A1000',
@@ -431,6 +641,19 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     letterSpacing: 2,
+  },
+  parseErrorBar: {
+    backgroundColor: '#1A0D0D',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderTopWidth: 0.5,
+    borderTopColor: '#E74C3C',
+  },
+  parseErrorText: {
+    color: '#E74C3C',
+    fontSize: 11,
+    fontFamily: MONO,
+    textAlign: 'center',
   },
   inputBar: {
     flexDirection: 'row',
@@ -469,16 +692,6 @@ const styles = StyleSheet.create({
   },
   sendText: {
     color: '#2ECC71',
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 2,
-  },
-  finishBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-  },
-  finishText: {
-    color: '#EAEAEA',
     fontSize: 12,
     fontWeight: '700',
     letterSpacing: 2,

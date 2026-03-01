@@ -11,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { parseSetInput } from '../../services/setParser';
+import { parseSetInput, isParseError, formatSetDisplay, rpeToRir } from '../../services/setParser';
 import { useActiveWorkout } from '../../workout/controller/useActiveWorkout';
 import type { Deviation } from '../../workout/core/deviationEngine';
 import type { SessionSet } from '../../workout/core/sessionState';
@@ -23,6 +23,8 @@ import InfoChip from '../../components/InfoChip';
 import { useEducation } from '../../components/EducationProvider';
 import TutorialHint from '../../components/TutorialHint';
 import { getMeta, setMeta } from '../../services/metaStateService';
+import { generateSetFeedback } from '../../workout/core/coachingEngine';
+import FeedbackToast from '../../components/FeedbackToast';
 
 const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
 
@@ -40,12 +42,15 @@ export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorko
     submitSet,
     confirmOverride,
     undoLastSet,
+    editSet,
+    deleteSet,
     finishSession,
   } = useActiveWorkout();
 
   const inputRef = useRef<TextInput>(null);
   const timer = useSessionTimer(session?.startedAt ?? null);
   const [input, setInput] = useState('');
+  const [parseError, setParseError] = useState<string | null>(null);
   const [deviation, setDeviation] = useState<Deviation | null>(null);
   const [pendingParsed, setPendingParsed] = useState<{
     exerciseName: string;
@@ -57,6 +62,10 @@ export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorko
   const [todayRationale, setTodayRationale] = useState<string | null>(null);
   const [isFirstWorkout, setIsFirstWorkout] = useState(false);
   const [setsLogged, setSetsLogged] = useState(0);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editInput, setEditInput] = useState('');
+  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
+  const [feedbackType, setFeedbackType] = useState<'info' | 'warning'>('info');
 
   useEffect(() => {
     initSession('planned', draftId);
@@ -70,20 +79,46 @@ export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorko
     setSetsLogged(session?.sets.length ?? 0);
   }, [session?.sets.length]);
 
-  const handleSubmit = async () => {
-    const parsed = parseSetInput(input.trim());
-    if (!parsed) return;
+  // Auto-dismiss parse errors after 3s
+  useEffect(() => {
+    if (parseError) {
+      const timer = setTimeout(() => setParseError(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [parseError]);
 
-    const dev = await submitSet(parsed.exerciseName, parsed.weight, parsed.reps, parsed.rpe);
+  const handleSubmit = async () => {
+    const result = parseSetInput(input.trim());
+    if (isParseError(result)) {
+      setParseError(result.error);
+      return;
+    }
+
+    setParseError(null);
+    const dev = await submitSet(result.exerciseName, result.weight, result.reps, result.rpe);
     if (dev) {
       setDeviation(dev);
-      setPendingParsed(parsed);
+      setPendingParsed(result);
       return;
     }
 
     setInput('');
     setDeviation(null);
     setPendingParsed(null);
+
+    // Show coaching feedback
+    if (session) {
+      const feedback = generateSetFeedback(session, {
+        exerciseName: result.exerciseName,
+        weight: result.weight,
+        reps: result.reps,
+        rpe: result.rpe,
+      });
+      if (feedback) {
+        setFeedbackMessage(feedback.message);
+        setFeedbackType(feedback.type);
+      }
+    }
   };
 
   const handleOverride = async () => {
@@ -108,6 +143,42 @@ export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorko
   const handleExerciseTap = (exerciseName: string) => {
     setInput(exerciseName.toLowerCase() + ' ');
     inputRef.current?.focus();
+  };
+
+  const handleSetTap = (globalIndex: number, set: SessionSet) => {
+    const rir = rpeToRir(set.rpe);
+    const weightPart = set.weight != null ? `${set.weight}x` : '';
+    setEditInput(`${set.exerciseName} ${weightPart}${set.reps} r${rir}`);
+    setEditingIndex(globalIndex);
+  };
+
+  const handleEditSave = async () => {
+    if (editingIndex == null) return;
+    const result = parseSetInput(editInput.trim());
+    if (isParseError(result)) {
+      setParseError(result.error);
+      return;
+    }
+    setParseError(null);
+    await editSet(editingIndex, result.exerciseName, result.weight, result.reps, result.rpe);
+    setEditingIndex(null);
+    setEditInput('');
+  };
+
+  const handleEditCancel = () => {
+    setEditingIndex(null);
+    setEditInput('');
+  };
+
+  const handleSetLongPress = (globalIndex: number) => {
+    Alert.alert(
+      'Delete this set?',
+      'This will remove the set and recalculate stress.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => deleteSet(globalIndex) },
+      ],
+    );
   };
 
   const handleFinish = () => {
@@ -146,6 +217,7 @@ export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorko
     ? Math.round((session.cumulativeStress / session.allowedStress) * 100)
     : null;
 
+  const rirCap = rpeToRir(session.caps.max_rpe);
   const loggedByExercise = groupByExercise(session.sets);
   const mainExercises = planBlocks
     .filter((b) => b.name === 'Main')
@@ -157,6 +229,12 @@ export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorko
   );
 
   const halfBudget = session.allowedStress > 0 && stressPct !== null && stressPct >= 45 && stressPct <= 55;
+
+  // Build global index map for all sets
+  const globalIndexMap = new Map<string, number>();
+  session.sets.forEach((s, i) => {
+    globalIndexMap.set(`${s.exerciseName}-${s.setNumber}`, i);
+  });
 
   return (
     <KeyboardAvoidingView
@@ -184,8 +262,8 @@ export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorko
           )}
         </View>
         <View style={styles.capsRow}>
-          <InfoChip topic="rpe">
-            <Text style={styles.capChip}>RPE {session.caps.max_rpe}</Text>
+          <InfoChip topic="rir">
+            <Text style={styles.capChip}>RIR {rirCap}</Text>
           </InfoChip>
           <InfoChip topic="stress_budget">
             <Text style={styles.capChip}>{session.caps.max_allowed_stress_pct}%</Text>
@@ -226,10 +304,13 @@ export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorko
               exercise={ex}
               loggedSets={loggedSets}
               isFatigued={isFatigued}
+              globalIndexMap={globalIndexMap}
               onTap={() => handleExerciseTap(ex.name)}
+              onSetTap={handleSetTap}
+              onSetLongPress={handleSetLongPress}
               onInfoTap={() => {
                 if (ex.description || ex.coaching_tip) {
-                  openTopic('rpe'); // fallback; ideally exercise-specific
+                  openTopic('rir');
                 }
               }}
             />
@@ -247,27 +328,39 @@ export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorko
                     <Text style={styles.fatigueTag}>FATIGUE</Text>
                   )}
                 </View>
-                {sets.map((s, j) => (
-                  <SetRowView key={j} set={s} />
-                ))}
+                {sets.map((s, j) => {
+                  const gIdx = globalIndexMap.get(`${s.exerciseName}-${s.setNumber}`) ?? -1;
+                  return (
+                    <Pressable
+                      key={j}
+                      onPress={() => handleSetTap(gIdx, s)}
+                      onLongPress={() => handleSetLongPress(gIdx)}
+                    >
+                      <SetRowView set={s} />
+                    </Pressable>
+                  );
+                })}
               </View>
             ))}
           </>
         )}
 
         {mainExercises.length === 0 && loggedByExercise.length === 0 && (
-          <Text style={styles.emptyHint}>Log sets below{'\n'}e.g. bench press 135x5@8</Text>
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyHint}>bench press 80x8 r2</Text>
+            <Text style={styles.emptySubtext}>r2 = could do 2 more reps</Text>
+          </View>
         )}
 
         <TutorialHint
           hintKey="first_workout_input"
-          message="Type your set: 80x8@7 means 80kg for 8 reps at effort level 7"
+          message="Type your set: 80x8 r2 means 80kg for 8 reps with 2 reps left in the tank"
           visible={isFirstWorkout && setsLogged === 0 && mainExercises.length > 0}
         />
 
         <TutorialHint
           hintKey="first_workout_stress"
-          message={`Nice! That added stress to your budget. You have ${session.allowedStress > 0 ? Math.round(session.allowedStress - session.cumulativeStress) : '—'} remaining.`}
+          message={`Nice! That added stress to your budget. You have ${session.allowedStress > 0 ? Math.round(session.allowedStress - session.cumulativeStress) : '\u2014'} remaining.`}
           visible={isFirstWorkout && setsLogged === 1}
         />
 
@@ -276,7 +369,47 @@ export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorko
           message="Halfway through today's budget. Pacing well."
           visible={isFirstWorkout && halfBudget}
         />
+
+        {/* FINISH WORKOUT button at bottom of scroll content */}
+        {session.sets.length > 0 && (
+          <Pressable
+            onPress={handleFinish}
+            style={({ pressed }) => [
+              styles.finishWorkoutBtn,
+              pressed && styles.finishWorkoutBtnPressed,
+            ]}
+            disabled={finishing}>
+            <Text style={styles.finishWorkoutText}>
+              {finishing ? 'FINISHING...' : 'FINISH WORKOUT'}
+            </Text>
+          </Pressable>
+        )}
       </ScrollView>
+
+      {/* Edit modal inline */}
+      {editingIndex != null && (
+        <View style={styles.editBar}>
+          <Text style={styles.editLabel}>EDIT SET</Text>
+          <TextInput
+            style={styles.editInput}
+            value={editInput}
+            onChangeText={setEditInput}
+            autoFocus
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="done"
+            onSubmitEditing={handleEditSave}
+          />
+          <View style={styles.editActions}>
+            <Pressable onPress={handleEditSave} style={styles.editBtn}>
+              <Text style={styles.editSaveText}>SAVE</Text>
+            </Pressable>
+            <Pressable onPress={handleEditCancel} style={styles.editBtn}>
+              <Text style={styles.editCancelText}>CANCEL</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
 
       {deviation && (
         <View style={styles.warningBar}>
@@ -292,13 +425,29 @@ export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorko
         </View>
       )}
 
+      <FeedbackToast
+        message={feedbackMessage}
+        type={feedbackType}
+        onDismiss={() => setFeedbackMessage(null)}
+      />
+
+      {/* Parse error display */}
+      {parseError && (
+        <View style={styles.parseErrorBar}>
+          <Text style={styles.parseErrorText}>{parseError}</Text>
+        </View>
+      )}
+
       <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, 8) }]}>
         <TextInput
           ref={inputRef}
           style={styles.input}
           value={input}
-          onChangeText={setInput}
-          placeholder="bench press 135x5@8"
+          onChangeText={(text) => {
+            setInput(text);
+            if (parseError) setParseError(null);
+          }}
+          placeholder="bench press 80x8 r2"
           placeholderTextColor="#444444"
           autoCapitalize="none"
           autoCorrect={false}
@@ -314,14 +463,6 @@ export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorko
         <Pressable onPress={handleSubmit} style={styles.sendBtn}>
           <Text style={styles.sendText}>LOG</Text>
         </Pressable>
-        <Pressable
-          onPress={handleFinish}
-          style={styles.finishBtn}
-          disabled={finishing}>
-          <Text style={styles.finishText}>
-            {finishing ? '...' : 'DONE'}
-          </Text>
-        </Pressable>
       </View>
     </KeyboardAvoidingView>
   );
@@ -331,18 +472,26 @@ function ExerciseCard({
   exercise,
   loggedSets,
   isFatigued,
+  globalIndexMap,
   onTap,
+  onSetTap,
+  onSetLongPress,
   onInfoTap,
 }: {
   exercise: PlanExercise;
   loggedSets: SessionSet[];
   isFatigued: boolean;
+  globalIndexMap: Map<string, number>;
   onTap: () => void;
+  onSetTap: (globalIndex: number, set: SessionSet) => void;
+  onSetLongPress: (globalIndex: number) => void;
   onInfoTap: () => void;
 }) {
   const target = exercise.sets && exercise.rep_range
     ? `${exercise.sets}\u00D7${exercise.rep_range}`
     : '';
+
+  const rirTarget = exercise.rpe_target ? rpeToRir(exercise.rpe_target) : null;
 
   return (
     <Pressable onPress={onTap} style={styles.card}>
@@ -352,9 +501,9 @@ function ExerciseCard({
           {target ? <Text style={styles.cardTarget}>{target}</Text> : null}
         </View>
         <View style={styles.cardMeta}>
-          {exercise.rpe_target && (
-            <InfoChip topic="rpe">
-              <Text style={styles.cardRpe}>@RPE {exercise.rpe_target}</Text>
+          {rirTarget != null && (
+            <InfoChip topic="rir">
+              <Text style={styles.cardRpe}>RIR {rirTarget}</Text>
             </InfoChip>
           )}
           {(exercise.description || exercise.coaching_tip) && (
@@ -379,9 +528,18 @@ function ExerciseCard({
         </View>
       )}
 
-      {loggedSets.map((s, i) => (
-        <SetRowView key={i} set={s} />
-      ))}
+      {loggedSets.map((s, i) => {
+        const gIdx = globalIndexMap.get(`${s.exerciseName}-${s.setNumber}`) ?? -1;
+        return (
+          <Pressable
+            key={i}
+            onPress={() => onSetTap(gIdx, s)}
+            onLongPress={() => onSetLongPress(gIdx)}
+          >
+            <SetRowView set={s} />
+          </Pressable>
+        );
+      })}
 
       {loggedSets.length < (exercise.sets ?? 0) && (
         <Text style={styles.cardSlot}>
@@ -397,7 +555,7 @@ function SetRowView({ set }: { set: SessionSet }) {
     <View style={styles.setRow}>
       <Text style={styles.setNum}>#{set.setNumber}</Text>
       <Text style={styles.setText}>
-        {set.weight != null ? `${set.weight}\u00D7` : ''}{set.reps}@{set.rpe}
+        {formatSetDisplay(set.weight, set.reps, set.rpe)}
       </Text>
       <Text style={styles.setStress}>{Math.round(set.stressUnits)}</Text>
       {set.capOverride && <Text style={styles.overrideTag}>OVR</Text>}
@@ -632,7 +790,7 @@ const styles = StyleSheet.create({
   setRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 4,
+    paddingVertical: 6,
     gap: 12,
   },
   setNum: {
@@ -660,13 +818,85 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 1,
   },
+  emptyContainer: {
+    marginTop: 80,
+    alignItems: 'center',
+  },
   emptyHint: {
-    color: '#333333',
+    color: '#444444',
     fontSize: 13,
     textAlign: 'center',
-    marginTop: 80,
-    lineHeight: 22,
     fontFamily: MONO,
+    marginBottom: 4,
+  },
+  emptySubtext: {
+    color: '#333333',
+    fontSize: 11,
+    textAlign: 'center',
+    fontFamily: MONO,
+  },
+  finishWorkoutBtn: {
+    marginTop: 24,
+    marginBottom: 16,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#EAEAEA',
+  },
+  finishWorkoutBtnPressed: {
+    backgroundColor: '#1A1A1A',
+  },
+  finishWorkoutText: {
+    color: '#EAEAEA',
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 3,
+    fontFamily: MONO,
+  },
+  editBar: {
+    backgroundColor: '#111122',
+    borderTopWidth: 0.5,
+    borderTopColor: '#333366',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  editLabel: {
+    color: '#8888CC',
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 2,
+    marginBottom: 6,
+  },
+  editInput: {
+    color: '#EAEAEA',
+    fontSize: 14,
+    fontFamily: MONO,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#151515',
+    borderWidth: 0.5,
+    borderColor: '#333366',
+    marginBottom: 8,
+  },
+  editActions: {
+    flexDirection: 'row',
+    gap: 16,
+  },
+  editBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  editSaveText: {
+    color: '#2ECC71',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 2,
+  },
+  editCancelText: {
+    color: '#555555',
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 2,
   },
   warningBar: {
     backgroundColor: '#1A1000',
@@ -699,6 +929,19 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     letterSpacing: 2,
+  },
+  parseErrorBar: {
+    backgroundColor: '#1A0D0D',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderTopWidth: 0.5,
+    borderTopColor: '#E74C3C',
+  },
+  parseErrorText: {
+    color: '#E74C3C',
+    fontSize: 11,
+    fontFamily: MONO,
+    textAlign: 'center',
   },
   inputBar: {
     flexDirection: 'row',
@@ -737,16 +980,6 @@ const styles = StyleSheet.create({
   },
   sendText: {
     color: '#2ECC71',
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 2,
-  },
-  finishBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-  },
-  finishText: {
-    color: '#EAEAEA',
     fontSize: 12,
     fontWeight: '700',
     letterSpacing: 2,

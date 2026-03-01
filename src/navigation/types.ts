@@ -21,7 +21,6 @@ export type RootTabParamList = {
   Dashboard: undefined;
   Train: NavigatorScreenParams<TrainStackParamList>;
   Health: undefined;
-  Sync: undefined;
   Settings: undefined;
 };
 
@@ -35,5 +34,4 @@ export type PostWorkoutDebriefProps = NativeStackScreenProps<TrainStackParamList
 export type WorkoutHistoryProps = NativeStackScreenProps<TrainStackParamList, 'WorkoutHistory'>;
 export type DashboardTabProps = BottomTabScreenProps<RootTabParamList, 'Dashboard'>;
 export type HealthTabProps = BottomTabScreenProps<RootTabParamList, 'Health'>;
-export type SyncTabProps = BottomTabScreenProps<RootTabParamList, 'Sync'>;
 export type SettingsTabProps = BottomTabScreenProps<RootTabParamList, 'Settings'>;

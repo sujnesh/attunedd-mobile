@@ -3,6 +3,7 @@ import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-n
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import type { CompositeNavigationProp } from '@react-navigation/native';
 import {
   loadLatestEvaluation,
   triggerManualEvaluation,
@@ -17,6 +18,7 @@ import {
 } from '../services/explanationEngine';
 import { apiCached } from '../services/apiClient';
 import { deriveCaps } from '../state/evaluationEngine';
+import { executeSql } from '../db/database';
 import InfoChip from '../components/InfoChip';
 import type { RootTabParamList } from '../navigation/types';
 import type {
@@ -28,6 +30,12 @@ import type {
   PlanDayData,
   PlanExercise,
 } from '../types/api';
+
+interface RecentWorkout {
+  mode: string;
+  stress: number;
+  completedAt: string;
+}
 
 const BAND_COLORS: Record<string, string> = {
   green: '#2ECC71',
@@ -65,7 +73,7 @@ function formatTimestamp(ts: number | null): string {
 }
 
 function mapServerToReadinessState(server: CoachingTodayResponse): ReadinessState {
-  const score = Math.round(server.adaptation_score * 100);
+  const score = Math.round(server.adaptation_score);
   const band = server.risk_band;
   const policyCaps = server.policy_caps as Record<string, number | boolean>;
   const caps: ParsedCaps = {
@@ -100,12 +108,14 @@ export default function DashboardScreen() {
   const [heavySim, setHeavySim] = useState<HeavySessionSimulation | null>(null);
   const [isWelcome, setIsWelcome] = useState(false);
   const [todayPlan, setTodayPlan] = useState<PlanDayData | null>(null);
+  const [recentWorkouts, setRecentWorkouts] = useState<RecentWorkout[]>([]);
 
   useFocusEffect(
     useCallback(() => {
       loadDashboard();
       fetchProjections();
       fetchTodayPlan();
+      fetchRecentWorkouts();
     }, [])
   );
 
@@ -148,6 +158,28 @@ export default function DashboardScreen() {
       setTodayPlan(today ?? null);
     } catch {
       // plan fetch failure is non-fatal
+    }
+  }, []);
+
+  const fetchRecentWorkouts = useCallback(async () => {
+    try {
+      const [result] = await executeSql(
+        `SELECT mode, actual_stress, completed_at FROM workout_logs
+         WHERE status = 'completed'
+         ORDER BY completed_at DESC LIMIT 3;`
+      );
+      const workouts: RecentWorkout[] = [];
+      for (let i = 0; i < result.rows.length; i++) {
+        const row = result.rows.item(i);
+        workouts.push({
+          mode: row.mode,
+          stress: Math.round(row.actual_stress),
+          completedAt: row.completed_at,
+        });
+      }
+      setRecentWorkouts(workouts);
+    } catch {
+      // non-fatal
     }
   }, []);
 
@@ -228,6 +260,13 @@ export default function DashboardScreen() {
         <TodayPlanCard
           day={todayPlan}
           onStartWorkout={() => navigation.navigate('Train', { screen: 'TrainHome' })}
+        />
+      )}
+
+      {recentWorkouts.length > 0 && (
+        <RecentWorkoutsSection
+          workouts={recentWorkouts}
+          onViewAll={() => navigation.navigate('Train', { screen: 'WorkoutHistory' })}
         />
       )}
 
@@ -385,6 +424,35 @@ function TodayPlanCard({
         ]}>
         <Text style={styles.startBtnText}>START WORKOUT</Text>
       </Pressable>
+    </View>
+  );
+}
+
+function RecentWorkoutsSection({
+  workouts,
+  onViewAll,
+}: {
+  workouts: RecentWorkout[];
+  onViewAll: () => void;
+}) {
+  return (
+    <View style={styles.section}>
+      <Pressable onPress={onViewAll} style={styles.recentHeader}>
+        <Text style={styles.sectionHeader}>RECENT WORKOUTS</Text>
+        <Text style={styles.viewAllText}>VIEW ALL</Text>
+      </Pressable>
+      {workouts.map((w, i) => {
+        const d = new Date(w.completedAt);
+        const dateStr = `${d.getMonth() + 1}/${d.getDate()}`;
+        const modeLabel = w.mode.replace(/_/g, ' ').toUpperCase();
+        return (
+          <View key={i} style={styles.recentRow}>
+            <Text style={styles.recentDate}>{dateStr}</Text>
+            <Text style={styles.recentMode}>{modeLabel}</Text>
+            <Text style={styles.recentStress}>{w.stress} stress</Text>
+          </View>
+        );
+      })}
     </View>
   );
 }
@@ -720,6 +788,40 @@ const styles = StyleSheet.create({
     color: '#F1C40F',
     fontSize: 11,
     marginTop: 6,
+  },
+  recentHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  viewAllText: {
+    color: '#555555',
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 1,
+  },
+  recentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    gap: 12,
+  },
+  recentDate: {
+    color: '#888888',
+    fontSize: 11,
+    fontFamily: MONO,
+    width: 40,
+  },
+  recentMode: {
+    color: '#CCCCCC',
+    fontSize: 12,
+    flex: 1,
+  },
+  recentStress: {
+    color: '#888888',
+    fontSize: 11,
+    fontFamily: MONO,
   },
   bandRow: {
     marginBottom: 12,

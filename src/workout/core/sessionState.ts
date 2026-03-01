@@ -86,6 +86,45 @@ export function removeLastSet(state: SessionState): SessionState {
   };
 }
 
+export function editSetAt(
+  state: SessionState,
+  index: number,
+  exerciseName: string,
+  weight: number | null,
+  reps: number,
+  rpe: number,
+): SessionState {
+  if (index < 0 || index >= state.sets.length) return state;
+  const oldSet = state.sets[index];
+  const newStress = calculateStress(weight, reps, rpe);
+  const newSets = [...state.sets];
+  newSets[index] = {
+    ...oldSet,
+    exerciseName,
+    weight,
+    reps,
+    rpe,
+    stressUnits: newStress,
+    timestamp: Date.now(),
+  };
+  const totalStress = newSets.reduce((sum, s) => sum + s.stressUnits, 0);
+  return { ...state, sets: newSets, cumulativeStress: totalStress };
+}
+
+export function deleteSetAt(state: SessionState, index: number): SessionState {
+  if (index < 0 || index >= state.sets.length) return state;
+  const newSets = state.sets.filter((_, i) => i !== index);
+  // Renumber sets per exercise
+  const exerciseCounts = new Map<string, number>();
+  for (const s of newSets) {
+    const count = (exerciseCounts.get(s.exerciseName) ?? 0) + 1;
+    exerciseCounts.set(s.exerciseName, count);
+    s.setNumber = count;
+  }
+  const totalStress = newSets.reduce((sum, s) => sum + s.stressUnits, 0);
+  return { ...state, sets: newSets, cumulativeStress: totalStress };
+}
+
 export type NeuralLoadLevel = 'none' | 'moderate' | 'high';
 
 export function getNeuralLoadStatus(state: SessionState): NeuralLoadLevel {

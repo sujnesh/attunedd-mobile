@@ -4,7 +4,7 @@ import { deriveCaps } from '../../state/evaluationEngine';
 import { runEvaluation } from '../../state/evaluationEngine';
 import { enqueueEvent } from '../../sync/eventQueue';
 import { EVENT_TYPES } from '../../sync/eventTypes';
-import { getMeta, getLatestDebrief, clearDebrief } from '../../services/metaStateService';
+import { getMeta, setMeta, getLatestDebrief, clearDebrief } from '../../services/metaStateService';
 import { flushQueue } from '../../sync/syncEngine';
 import type { DebriefData } from '../../types/api';
 import { detectPlannedFatigue, detectFreeFormFatigue } from '../../engine/fatigue';
@@ -12,6 +12,8 @@ import {
   initializeSession,
   addSet,
   removeLastSet,
+  editSetAt,
+  deleteSetAt,
   getRecentSetsForExercise,
   serialize,
   deserialize,
@@ -60,6 +62,14 @@ export interface UseActiveWorkoutReturn {
     deviation: Deviation,
   ) => Promise<void>;
   undoLastSet: () => Promise<void>;
+  editSet: (
+    index: number,
+    exerciseName: string,
+    weight: number | null,
+    reps: number,
+    rpe: number,
+  ) => Promise<void>;
+  deleteSet: (index: number) => Promise<void>;
   finishSession: () => Promise<DebriefData | null>;
 }
 
@@ -245,6 +255,28 @@ export function useActiveWorkout(): UseActiveWorkoutReturn {
     await persistDraft(updated, overrides);
   }, [session, overrides, persistDraft]);
 
+  const editSet = useCallback(async (
+    index: number,
+    exerciseName: string,
+    weight: number | null,
+    reps: number,
+    rpe: number,
+  ) => {
+    if (!session) return;
+    const updated = editSetAt(session, index, exerciseName, weight, reps, rpe);
+    setSession(updated);
+    setNudge(evaluateNudge(updated));
+    await persistDraft(updated, overrides);
+  }, [session, overrides, persistDraft]);
+
+  const deleteSet = useCallback(async (index: number) => {
+    if (!session) return;
+    const updated = deleteSetAt(session, index);
+    setSession(updated);
+    setNudge(evaluateNudge(updated));
+    await persistDraft(updated, overrides);
+  }, [session, overrides, persistDraft]);
+
   const finishSession = useCallback(async (): Promise<DebriefData | null> => {
     if (!session || finishing) return null;
     setFinishing(true);
@@ -360,14 +392,18 @@ export function useActiveWorkout(): UseActiveWorkoutReturn {
           if (debrief) return debrief;
         }
         if (flushResult.failed > 0) {
-          throw new Error('Sync failed. Please retry.');
+          // Don't throw — return local debrief instead of stranding user
+          return buildLocalDebrief(session);
         }
       }
 
-      // Fallback: run local evaluation if no auth token (offline dev)
+      // Fallback: run local evaluation, return local debrief
       await runEvaluation();
-      return null;
+      return buildLocalDebrief(session);
     } finally {
+      // Clear dashboard caches so next load fetches fresh data
+      await setMeta('cache_coaching_today', '');
+      await setMeta('cache_plans_current', '');
       setFinishing(false);
     }
   }, [session, overrides, finishing]);
@@ -383,6 +419,8 @@ export function useActiveWorkout(): UseActiveWorkoutReturn {
     submitSet,
     confirmOverride,
     undoLastSet,
+    editSet,
+    deleteSet,
     finishSession,
   };
 }
@@ -419,4 +457,33 @@ async function getAppVersion(): Promise<string> {
   );
   if (results.rows.length > 0) return results.rows.item(0).value;
   return '1.0.0';
+}
+
+function buildLocalDebrief(session: SessionState): DebriefData {
+  const exerciseNames = [...new Set(session.sets.map((s) => s.exerciseName))];
+  const stressUtil =
+    session.allowedStress > 0
+      ? Math.round((session.cumulativeStress / session.allowedStress) * 100)
+      : 0;
+
+  let effort: DebriefData['effort_rating'] = 'light';
+  if (stressUtil >= 90) effort = 'overdone';
+  else if (stressUtil >= 70) effort = 'solid';
+  else if (stressUtil >= 40) effort = 'moderate';
+
+  const durationMin = Math.round((Date.now() - session.startedAt) / 60000);
+
+  return {
+    score_before: 0,
+    score_after: 0,
+    adaptation_delta: 0,
+    band_before: 'green',
+    band_after: 'green',
+    band_dropped: false,
+    stress_utilization: stressUtil,
+    effort_rating: effort,
+    sets_logged: session.sets.length,
+    muscles_trained: exerciseNames,
+    summary_line: `${session.sets.length} sets in ${durationMin} min. Sync pending \u2014 full analysis available when connected.`,
+  };
 }

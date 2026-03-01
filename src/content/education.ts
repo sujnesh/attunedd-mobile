@@ -5,8 +5,8 @@ export interface EducationEntry {
 }
 
 export type EducationTopic =
-  | 'rpe'
-  | 'rpe_target'
+  | 'rir'
+  | 'rir_target'
   | 'zone_1'
   | 'zone_2'
   | 'zone_3'
@@ -27,15 +27,15 @@ export type EducationTopic =
   | 'fatigue_detected';
 
 export const EDUCATION: Record<EducationTopic, EducationEntry> = {
-  rpe: {
-    title: 'Rate of Perceived Exertion',
-    body: 'RPE is a scale of 1-10 that measures how hard a set felt. RPE 7 means you could have done about 3 more reps. RPE 8 means 2 more reps. RPE 10 means absolute failure — you couldn\u2019t do one more rep.',
-    coachTip: 'Most training happens at RPE 6-8. Save RPE 9-10 for testing days.',
+  rir: {
+    title: 'Reps in Reserve (RIR)',
+    body: 'RIR measures how many more reps you could have done after finishing a set. RIR 0 means you hit failure \u2014 you couldn\u2019t do one more rep. RIR 2 means you could have done 2 more. RIR 3 means 3 more reps were possible.',
+    coachTip: 'Most training happens at RIR 2-4. Save RIR 0-1 for testing days.',
   },
-  rpe_target: {
-    title: 'Why RPE Targets?',
-    body: 'Training at the right effort level maximizes gains without overtraining. Too easy and you won\u2019t stimulate growth. Too hard every session and your body can\u2019t recover. RPE targets keep you in the productive zone.',
-    coachTip: 'Hit the target RPE, not a specific weight. Some days you\u2019re stronger than others.',
+  rir_target: {
+    title: 'Why RIR Targets?',
+    body: 'Training at the right effort level maximizes gains without overtraining. Too easy and you won\u2019t stimulate growth. Too hard every session and your body can\u2019t recover. RIR targets keep you in the productive zone.',
+    coachTip: 'Hit the target RIR, not a specific weight. Some days you\u2019re stronger than others.',
   },
   zone_1: {
     title: 'Zone 1 \u2014 Recovery',
@@ -74,7 +74,7 @@ export const EDUCATION: Record<EducationTopic, EducationEntry> = {
   },
   stress_units: {
     title: 'Stress Units',
-    body: 'How we measure workout load in a single number. Combines weight lifted, reps performed, and effort level (RPE) into one comparable metric. More stress units = harder workout.',
+    body: 'How we measure workout load in a single number. Combines weight lifted, reps performed, and effort level into one comparable metric. More stress units = harder workout.',
     coachTip: 'Track your stress units over weeks. Gradual increases mean you\u2019re progressing.',
   },
   stress_budget: {
@@ -119,7 +119,7 @@ export const EDUCATION: Record<EducationTopic, EducationEntry> = {
   },
   override: {
     title: 'Overriding a Cap',
-    body: 'When your coach sets a limit (like max RPE 8), you can choose to push past it. This is tracked and affects future recommendations. Occasional overrides are fine \u2014 your coach will adjust. Frequent overrides signal that caps may be too conservative.',
+    body: 'When your coach sets a limit (like min RIR 2), you can choose to push past it. This is tracked and affects future recommendations. Occasional overrides are fine \u2014 your coach will adjust. Frequent overrides signal that caps may be too conservative.',
     coachTip: 'Override when you genuinely feel good. Not just because you want to push.',
   },
   fatigue_detected: {
