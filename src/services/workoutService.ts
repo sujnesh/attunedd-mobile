@@ -145,7 +145,7 @@ export async function logSet(
   const appVersion = await getAppVersion();
 
   const payload: LogSetPayload = {
-    workout_log_id: mobileLocalId,
+    mobile_local_id: mobileLocalId,
     exercise_name: exerciseName,
     set_number: setNumber,
     weight,
@@ -237,7 +237,7 @@ export async function finishWorkout(workoutId: number): Promise<void> {
   const appVersion = await getAppVersion();
 
   const payload: CompleteWorkoutPayload = {
-    workout_log_id: mobileLocalId,
+    mobile_local_id: mobileLocalId,
   };
 
   await enqueueEvent({

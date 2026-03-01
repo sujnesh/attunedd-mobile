@@ -32,23 +32,27 @@ export default function HealthScreen() {
   const [sleepData, setSleepData] = useState<WhoopSleepData[]>([]);
 
   const load = useCallback(async () => {
-    const [acts, syncTs] = await Promise.all([
-      getRecentActivities(50),
-      getMeta('last_sync_at'),
-    ]);
-    setActivities(acts);
-    setLastSync(syncTs);
-
-    // Fetch WHOOP recovery data (non-blocking)
     try {
-      const whoop = await apiCached<WhoopRecentResponse>('/api/whoop/recent', 'cache_whoop_recent');
-      setCycles(whoop.cycles);
-      setSleepData(whoop.sleep);
-    } catch {
-      // Not connected or no data — fine
-    }
+      const [acts, syncTs] = await Promise.all([
+        getRecentActivities(50),
+        getMeta('last_sync_at'),
+      ]);
+      setActivities(acts);
+      setLastSync(syncTs);
 
-    setLoaded(true);
+      // Fetch WHOOP recovery data (non-blocking)
+      try {
+        const whoop = await apiCached<WhoopRecentResponse>('/api/whoop/recent', 'cache_whoop_recent');
+        setCycles(whoop.cycles);
+        setSleepData(whoop.sleep);
+      } catch {
+        // Not connected or no data — fine
+      }
+    } catch {
+      // DB or meta read failed — still show screen with empty state
+    } finally {
+      setLoaded(true);
+    }
   }, []);
 
   useFocusEffect(

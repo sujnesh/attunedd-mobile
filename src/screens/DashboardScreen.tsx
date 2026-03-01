@@ -110,15 +110,6 @@ export default function DashboardScreen() {
   const [todayPlan, setTodayPlan] = useState<PlanDayData | null>(null);
   const [recentWorkouts, setRecentWorkouts] = useState<RecentWorkout[]>([]);
 
-  useFocusEffect(
-    useCallback(() => {
-      loadDashboard();
-      fetchProjections();
-      fetchTodayPlan();
-      fetchRecentWorkouts();
-    }, [])
-  );
-
   const loadDashboard = useCallback(async () => {
     try {
       // Try server first
@@ -183,6 +174,15 @@ export default function DashboardScreen() {
     }
   }, []);
 
+  useFocusEffect(
+    useCallback(() => {
+      loadDashboard();
+      fetchProjections();
+      fetchTodayPlan();
+      fetchRecentWorkouts();
+    }, [loadDashboard, fetchProjections, fetchTodayPlan, fetchRecentWorkouts])
+  );
+
   const handleRefresh = useCallback(async () => {
     if (refreshing) return;
     setRefreshing(true);
@@ -244,15 +244,34 @@ export default function DashboardScreen() {
     >
       {/* Coach Section — the primary AI-driven experience */}
       <Text style={styles.coachLabel}>YOUR COACH</Text>
-      <Text style={[styles.score, { color: accent }]}>{data.score}</Text>
+      <InfoChip topic="adaptation_score" color={accent}>
+        <Text style={[styles.score, { color: accent }]}>{data.score}</Text>
+      </InfoChip>
+      <Text style={styles.scoreExplainer}>
+        READINESS SCORE
+      </Text>
+      <Text style={styles.scoreDetail}>
+        {data.score >= 80
+          ? 'You\'re well recovered. Push hard today.'
+          : data.score >= 60
+          ? 'Moderate recovery. Train smart, respect the caps.'
+          : data.score >= 40
+          ? 'Under-recovered. Keep it light or rest.'
+          : 'Significantly fatigued. Rest recommended.'}
+      </Text>
       <View style={styles.bandRow}>
-        <InfoChip topic="adaptation_score" color={accent}>
+        <InfoChip topic="risk_band" color={accent}>
           <Text style={[styles.bandLabel, { color: accent }]}>{bandLabel}</Text>
         </InfoChip>
       </View>
       <Text style={styles.decisionLine}>{headline}</Text>
       <Text style={styles.coachAttribution}>
-        Based on your training history, recovery data, and goals
+        AI analysis based on your training history, recovery data, and goals
+      </Text>
+
+      {/* Score breakdown hint */}
+      <Text style={styles.scoreBreakdownHint}>
+        Score = 100 minus recovery penalties. Tap the score to learn more.
       </Text>
 
       {isWelcome && (
@@ -279,6 +298,7 @@ export default function DashboardScreen() {
         <TodayPlanCard
           day={todayPlan}
           onStartWorkout={() => navigation.navigate('Train', { screen: 'TrainHome' })}
+          onViewPlan={() => navigation.navigate('Train', { screen: 'PlanDetail' })}
         />
       )}
 
@@ -328,7 +348,7 @@ function PositiveNotesSection({ notes }: { notes: string[] }) {
 function WhyTodaySection({ explanation, score }: { explanation: ExplanationOutput; score: number }) {
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionHeader}>WHY TODAY</Text>
+      <Text style={styles.sectionHeader}>WHY THIS SCORE</Text>
       {explanation.penaltyBreakdown.map((row, i) => (
         <PenaltyRowView key={i} row={row} />
       ))}
@@ -371,9 +391,11 @@ function SessionLimitsSection({ limits }: { limits: LimitRow[] }) {
 function TodayPlanCard({
   day,
   onStartWorkout,
+  onViewPlan,
 }: {
   day: PlanDayData;
   onStartWorkout: () => void;
+  onViewPlan: () => void;
 }) {
   const sessionLabel = day.session_type.replace(/_/g, ' ').toUpperCase();
   const mainBlock = day.blocks.find((b) => b.name === 'Main');
@@ -381,28 +403,30 @@ function TodayPlanCard({
 
   if (day.rest_day) {
     return (
-      <View style={styles.todayCard}>
+      <Pressable style={styles.todayCard} onPress={onViewPlan}>
         <Text style={styles.todayHeader}>AI-GENERATED PLAN</Text>
         <Text style={styles.todaySessionType}>REST DAY</Text>
         {day.rationale ? (
           <Text style={styles.todayRationale}>{day.rationale}</Text>
         ) : null}
-      </View>
+        <Text style={styles.viewPlanHint}>TAP FOR FULL PLAN</Text>
+      </Pressable>
     );
   }
 
   if (day.workout_status === 'completed') {
     return (
-      <View style={styles.todayCard}>
+      <Pressable style={styles.todayCard} onPress={onViewPlan}>
         <Text style={styles.todayHeader}>AI-GENERATED PLAN</Text>
         <Text style={styles.todaySessionType}>{sessionLabel}</Text>
         <Text style={styles.todayCompleted}>COMPLETED</Text>
-      </View>
+        <Text style={styles.viewPlanHint}>TAP FOR FULL PLAN</Text>
+      </Pressable>
     );
   }
 
   return (
-    <View style={styles.todayCard}>
+    <Pressable style={styles.todayCard} onPress={onViewPlan}>
       <Text style={styles.todayHeader}>AI-GENERATED PLAN</Text>
       <Text style={styles.todaySessionType}>{sessionLabel}</Text>
       {day.rationale ? (
@@ -425,7 +449,8 @@ function TodayPlanCard({
         ]}>
         <Text style={styles.startBtnText}>START WORKOUT</Text>
       </Pressable>
-    </View>
+      <Text style={styles.viewPlanHint}>TAP CARD FOR FULL PLAN DETAILS</Text>
+    </Pressable>
   );
 }
 
@@ -601,11 +626,34 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     fontFamily: MONO,
   },
+  scoreExplainer: {
+    color: '#555555',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 3,
+    marginTop: 4,
+    marginBottom: 8,
+    fontFamily: MONO,
+  },
+  scoreDetail: {
+    color: '#888888',
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 8,
+    paddingHorizontal: 16,
+  },
+  scoreBreakdownHint: {
+    color: '#333333',
+    fontSize: 10,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
   coachAttribution: {
     color: '#444444',
     fontSize: 11,
     textAlign: 'center',
-    marginBottom: 24,
+    marginBottom: 8,
     fontStyle: 'italic',
   },
   coachingInsights: {
@@ -927,5 +975,14 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 2,
     fontFamily: MONO,
+  },
+  viewPlanHint: {
+    color: '#444444',
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 2,
+    fontFamily: MONO,
+    textAlign: 'center',
+    marginTop: 12,
   },
 });

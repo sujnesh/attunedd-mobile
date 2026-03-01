@@ -151,7 +151,20 @@ describe('DashboardScreen', () => {
 
     const { getByText } = render(<DashboardScreen />);
     await waitFor(() => {
-      expect(getByText('Based on your training history, recovery data, and goals')).toBeTruthy();
+      expect(getByText('AI analysis based on your training history, recovery data, and goals')).toBeTruthy();
+    });
+  });
+
+  it('renders score explanation text', async () => {
+    apiCached.mockImplementation((url: string) => {
+      if (url === '/api/coaching/today') return Promise.resolve(COACHING_RESPONSE);
+      return Promise.reject(new Error('skip'));
+    });
+
+    const { getByText } = render(<DashboardScreen />);
+    await waitFor(() => {
+      expect(getByText('READINESS SCORE')).toBeTruthy();
+      expect(getByText('Score = 100 minus recovery penalties. Tap the score to learn more.')).toBeTruthy();
     });
   });
 });

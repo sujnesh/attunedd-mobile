@@ -122,7 +122,7 @@ export async function flushQueue(authToken: string): Promise<FlushResult> {
 function extractMobileLocalId(payloadJson: string): string | null {
   try {
     const payload = JSON.parse(payloadJson);
-    return payload.workout_log_id || payload.mobile_local_id || null;
+    return payload.mobile_local_id || null;
   } catch {
     return null;
   }

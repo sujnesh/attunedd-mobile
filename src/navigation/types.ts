@@ -15,6 +15,7 @@ export type TrainStackParamList = {
   FreeFormWorkout: { draftId: number };
   PostWorkoutDebrief: { debrief: DebriefData };
   WorkoutHistory: undefined;
+  PlanDetail: undefined;
 };
 
 export type RootTabParamList = {
@@ -32,6 +33,7 @@ export type PlannedWorkoutProps = NativeStackScreenProps<TrainStackParamList, 'P
 export type FreeFormWorkoutProps = NativeStackScreenProps<TrainStackParamList, 'FreeFormWorkout'>;
 export type PostWorkoutDebriefProps = NativeStackScreenProps<TrainStackParamList, 'PostWorkoutDebrief'>;
 export type WorkoutHistoryProps = NativeStackScreenProps<TrainStackParamList, 'WorkoutHistory'>;
+export type PlanDetailProps = NativeStackScreenProps<TrainStackParamList, 'PlanDetail'>;
 export type DashboardTabProps = BottomTabScreenProps<RootTabParamList, 'Dashboard'>;
 export type HealthTabProps = BottomTabScreenProps<RootTabParamList, 'Health'>;
 export type SettingsTabProps = BottomTabScreenProps<RootTabParamList, 'Settings'>;

@@ -353,7 +353,7 @@ export function useActiveWorkout(): UseActiveWorkoutReturn {
 
       for (const s of session.sets) {
         const logPayload: LogSetPayload = {
-          workout_log_id: mobileLocalId,
+          mobile_local_id: mobileLocalId,
           exercise_name: s.exerciseName,
           set_number: s.setNumber,
           weight: s.weight,
@@ -372,7 +372,7 @@ export function useActiveWorkout(): UseActiveWorkoutReturn {
       }
 
       const completePayload: CompleteWorkoutPayload = {
-        workout_log_id: mobileLocalId,
+        mobile_local_id: mobileLocalId,
       };
       await enqueueEvent({
         id: generateUUID(),
@@ -401,9 +401,11 @@ export function useActiveWorkout(): UseActiveWorkoutReturn {
       await runEvaluation();
       return buildLocalDebrief(session);
     } finally {
-      // Clear dashboard caches so next load fetches fresh data
+      // Clear all dashboard caches so next load fetches fresh data
       await setMeta('cache_coaching_today', '');
       await setMeta('cache_plans_current', '');
+      await setMeta('cache_projections', '');
+      await setMeta('cache_whoop_recent', '');
       setFinishing(false);
     }
   }, [session, overrides, finishing]);

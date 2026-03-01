@@ -14,11 +14,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { parseSetInput, isParseError, formatSetDisplay, rpeToRir } from '../../services/setParser';
 import { useActiveWorkout } from '../../workout/controller/useActiveWorkout';
 import type { Deviation } from '../../workout/core/deviationEngine';
-import type { SessionSet } from '../../workout/core/sessionState';
+import type { SessionSet, SessionState } from '../../workout/core/sessionState';
+import type { DebriefData } from '../../types/api';
 import type { FreeFormWorkoutProps } from '../../navigation/types';
 import { useSessionTimer } from '../../workout/hooks/useSessionTimer';
 import { generateSetFeedback } from '../../workout/core/coachingEngine';
 import FeedbackToast from '../../components/FeedbackToast';
+import ExerciseSuggestions from '../../components/ExerciseSuggestions';
+import { getExerciseHistory, filterExercises, invalidateExerciseCache } from '../../services/exerciseHistory';
 
 const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
 
@@ -56,9 +59,12 @@ export default function FreeFormWorkoutScreen({ route, navigation }: FreeFormWor
   const [editInput, setEditInput] = useState('');
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [feedbackType, setFeedbackType] = useState<'info' | 'warning'>('info');
+  const [exerciseNames, setExerciseNames] = useState<string[]>([]);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
 
   useEffect(() => {
     initSession('free_form', draftId);
+    getExerciseHistory().then(setExerciseNames).catch(() => {});
   }, [draftId, initSession]);
 
   // Auto-dismiss parse errors after 3s
@@ -85,8 +91,15 @@ export default function FreeFormWorkoutScreen({ route, navigation }: FreeFormWor
     }
 
     setInput('');
+    setSuggestions([]);
     setDeviation(null);
     setPendingParsed(null);
+
+    // Add to exercise name list for future autocomplete
+    if (!exerciseNames.some((n) => n.toLowerCase() === result.exerciseName.toLowerCase())) {
+      setExerciseNames((prev) => [result.exerciseName, ...prev]);
+      invalidateExerciseCache();
+    }
 
     // Show coaching feedback
     if (session) {
@@ -176,12 +189,11 @@ export default function FreeFormWorkoutScreen({ route, navigation }: FreeFormWor
       if (debrief) {
         navigation.replace('PostWorkoutDebrief', { debrief });
       } else {
-        navigation.popToTop();
+        navigation.replace('PostWorkoutDebrief', { debrief: buildFallbackDebrief(session) });
       }
     } catch {
-      Alert.alert('Sync Failed', 'Could not reach server. Please retry.', [
-        { text: 'OK' },
-      ]);
+      // Always navigate to debrief — never strand the user
+      navigation.replace('PostWorkoutDebrief', { debrief: buildFallbackDebrief(session) });
     }
   };
 
@@ -343,6 +355,15 @@ export default function FreeFormWorkoutScreen({ route, navigation }: FreeFormWor
         </View>
       )}
 
+      <ExerciseSuggestions
+        suggestions={suggestions}
+        onSelect={(name) => {
+          setInput(name.toLowerCase() + ' ');
+          setSuggestions([]);
+          inputRef.current?.focus();
+        }}
+      />
+
       <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, 8) }]}>
         <TextInput
           ref={inputRef}
@@ -351,6 +372,13 @@ export default function FreeFormWorkoutScreen({ route, navigation }: FreeFormWor
           onChangeText={(text) => {
             setInput(text);
             if (parseError) setParseError(null);
+            // Show suggestions only while typing the exercise name (no digits yet)
+            const nameOnly = text.trim();
+            if (nameOnly && !/\d/.test(nameOnly)) {
+              setSuggestions(filterExercises(exerciseNames, nameOnly));
+            } else {
+              setSuggestions([]);
+            }
           }}
           placeholder="bench press 80x8 r2"
           placeholderTextColor="#444444"
@@ -371,6 +399,33 @@ export default function FreeFormWorkoutScreen({ route, navigation }: FreeFormWor
       </View>
     </KeyboardAvoidingView>
   );
+}
+
+function buildFallbackDebrief(session: SessionState | null): DebriefData {
+  if (!session || session.sets.length === 0) {
+    return {
+      score_before: 0, score_after: 0, adaptation_delta: 0,
+      band_before: 'green', band_after: 'green', band_dropped: false,
+      stress_utilization: 0, effort_rating: 'light',
+      sets_logged: 0, muscles_trained: [],
+      summary_line: 'Session ended. Sync pending \u2014 full analysis available when connected.',
+    };
+  }
+  const exerciseNames = [...new Set(session.sets.map((s) => s.exerciseName))];
+  const stressUtil = session.allowedStress > 0
+    ? Math.round((session.cumulativeStress / session.allowedStress) * 100) : 0;
+  let effort: DebriefData['effort_rating'] = 'light';
+  if (stressUtil >= 90) effort = 'overdone';
+  else if (stressUtil >= 70) effort = 'solid';
+  else if (stressUtil >= 40) effort = 'moderate';
+  const durationMin = Math.round((Date.now() - session.startedAt) / 60000);
+  return {
+    score_before: 0, score_after: 0, adaptation_delta: 0,
+    band_before: 'green', band_after: 'green', band_dropped: false,
+    stress_utilization: stressUtil, effort_rating: effort,
+    sets_logged: session.sets.length, muscles_trained: exerciseNames,
+    summary_line: `${session.sets.length} sets in ${durationMin} min. Sync pending \u2014 full analysis available when connected.`,
+  };
 }
 
 function groupByExercise(sets: SessionSet[]): [string, SessionSet[]][] {

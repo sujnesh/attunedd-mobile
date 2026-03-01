@@ -89,7 +89,9 @@ export default function TrainHomeScreen({ navigation }: TrainHomeProps) {
       <Text style={styles.title}>TRAIN</Text>
 
       {todaySession && !todaySession.rest_day && (
-        <View style={styles.planBlock}>
+        <Pressable
+          style={({ pressed }) => [styles.planBlock, pressed && styles.pressed]}
+          onPress={() => navigation.navigate('PlanDetail')}>
           <Text style={styles.planLabel}>TODAY&apos;S SESSION</Text>
           <Text style={styles.planName}>
             {formatSessionType(todaySession.session_type)}
@@ -111,21 +113,27 @@ export default function TrainHomeScreen({ navigation }: TrainHomeProps) {
                 {ex.duration_minutes ? `  ${ex.duration_minutes} min` : ''}
               </Text>
             ))}
-        </View>
+          <Text style={styles.viewDetailHint}>TAP FOR FULL PLAN DETAILS</Text>
+        </Pressable>
       )}
 
       {todaySession?.rest_day && (
-        <View style={styles.restBlock}>
+        <Pressable
+          style={({ pressed }) => [styles.restBlock, pressed && styles.pressed]}
+          onPress={() => navigation.navigate('PlanDetail')}>
           <Text style={styles.restLabel}>REST DAY</Text>
           {todaySession.rationale ? (
             <Text style={styles.restHint}>{todaySession.rationale}</Text>
           ) : (
             <Text style={styles.restHint}>Recovery is part of the program</Text>
           )}
-        </View>
+          <Text style={styles.viewDetailHint}>TAP FOR FULL PLAN DETAILS</Text>
+        </Pressable>
       )}
 
-      {week.length > 0 && <WeekSchedule week={week} />}
+      {week.length > 0 && (
+        <WeekSchedule week={week} onViewPlan={() => navigation.navigate('PlanDetail')} />
+      )}
 
       {draft && (
         <View style={styles.draftBlock}>
@@ -177,9 +185,11 @@ export default function TrainHomeScreen({ navigation }: TrainHomeProps) {
   );
 }
 
-function WeekSchedule({ week }: { week: PlanDayData[] }) {
+function WeekSchedule({ week, onViewPlan }: { week: PlanDayData[]; onViewPlan: () => void }) {
   return (
-    <View style={styles.weekBlock}>
+    <Pressable
+      style={({ pressed }) => [styles.weekBlock, pressed && styles.pressed]}
+      onPress={onViewPlan}>
       <Text style={styles.weekHeader}>THIS WEEK</Text>
       {week.map((day) => {
         const d = new Date(day.date + 'T00:00:00');
@@ -214,7 +224,8 @@ function WeekSchedule({ week }: { week: PlanDayData[] }) {
           </View>
         );
       })}
-    </View>
+      <Text style={styles.viewDetailHint}>TAP FOR FULL PLAN</Text>
+    </Pressable>
   );
 }
 
@@ -473,6 +484,15 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     letterSpacing: 2,
+  },
+  viewDetailHint: {
+    color: '#444444',
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 2,
+    fontFamily: MONO,
+    textAlign: 'center',
+    marginTop: 12,
   },
   status: {
     color: '#555555',

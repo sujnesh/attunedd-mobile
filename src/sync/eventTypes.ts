@@ -15,7 +15,7 @@ export interface StartWorkoutPayload {
 }
 
 export interface LogSetPayload {
-  workout_log_id: string;
+  mobile_local_id: string;
   exercise_name: string;
   set_number: number;
   weight: number | null;
@@ -27,11 +27,11 @@ export interface LogSetPayload {
 }
 
 export interface CompleteWorkoutPayload {
-  workout_log_id: string;
+  mobile_local_id: string;
 }
 
 export interface OverrideSessionPayload {
-  workout_log_id: string;
+  mobile_local_id: string;
 }
 
 export interface IngestExternalActivityPayload {

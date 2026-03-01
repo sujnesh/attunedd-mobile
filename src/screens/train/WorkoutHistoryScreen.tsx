@@ -78,11 +78,18 @@ export default function WorkoutHistoryScreen({ navigation }: WorkoutHistoryProps
       try {
         // Try server first
         const body = await fetchPage(1);
-        setWorkouts(body.workouts);
-        setHasMore(body.has_more);
-        setPage(1);
+        if (body.workouts.length > 0) {
+          setWorkouts(body.workouts);
+          setHasMore(body.has_more);
+          setPage(1);
+        } else {
+          // Server returned empty — check local database
+          const local = await fetchLocalWorkouts();
+          setWorkouts(local);
+          setHasMore(false);
+        }
       } catch {
-        // Fall back to local database
+        // Server unreachable — fall back to local database
         try {
           const local = await fetchLocalWorkouts();
           setWorkouts(local);

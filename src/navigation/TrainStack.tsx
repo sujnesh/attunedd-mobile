@@ -6,6 +6,7 @@ import PlannedWorkoutScreen from '../screens/train/PlannedWorkoutScreen';
 import FreeFormWorkoutScreen from '../screens/train/FreeFormWorkoutScreen';
 import PostWorkoutDebriefScreen from '../screens/train/PostWorkoutDebriefScreen';
 import WorkoutHistoryScreen from '../screens/train/WorkoutHistoryScreen';
+import PlanDetailScreen from '../screens/train/PlanDetailScreen';
 
 const Stack = createNativeStackNavigator<TrainStackParamList>();
 
@@ -22,6 +23,7 @@ export default function TrainStack() {
       <Stack.Screen name="FreeFormWorkout" component={FreeFormWorkoutScreen} />
       <Stack.Screen name="PostWorkoutDebrief" component={PostWorkoutDebriefScreen} />
       <Stack.Screen name="WorkoutHistory" component={WorkoutHistoryScreen} />
+      <Stack.Screen name="PlanDetail" component={PlanDetailScreen} />
     </Stack.Navigator>
   );
 }
