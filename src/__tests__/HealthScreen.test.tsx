@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, waitFor } from '@testing-library/react-native';
+import { render, waitFor, fireEvent } from '@testing-library/react-native';
 import HealthScreen from '../screens/HealthScreen';
 
 jest.mock('../services/healthService', () => ({
@@ -15,9 +15,18 @@ jest.mock('../services/apiClient', () => ({
   apiCached: jest.fn(),
 }));
 
+jest.mock('../db/database', () => ({
+  executeSql: jest.fn().mockResolvedValue([{ rows: { length: 0, item: jest.fn().mockReturnValue({ cnt: 0 }) } }]),
+}));
+
+jest.mock('../health/ingestionEngine', () => ({
+  ingestDeviceActivities: jest.fn().mockResolvedValue({ ingested: 0, skipped: 0 }),
+}));
+
 const { getRecentActivities } = require('../services/healthService');
 const { getMeta } = require('../services/metaStateService');
 const { apiCached } = require('../services/apiClient');
+const { executeSql } = require('../db/database');
 
 describe('HealthScreen', () => {
   beforeEach(() => {
@@ -25,6 +34,7 @@ describe('HealthScreen', () => {
     getRecentActivities.mockResolvedValue([]);
     getMeta.mockResolvedValue(null);
     apiCached.mockRejectedValue(new Error('no whoop'));
+    executeSql.mockResolvedValue([{ rows: { length: 0, item: jest.fn().mockReturnValue({ cnt: 0 }) } }]);
   });
 
   it('renders HEALTH title', async () => {
@@ -34,10 +44,10 @@ describe('HealthScreen', () => {
     });
   });
 
-  it('shows empty state when no data', async () => {
+  it('shows structured empty state when no data', async () => {
     const { getByText } = render(<HealthScreen />);
     await waitFor(() => {
-      expect(getByText('No health data yet')).toBeTruthy();
+      expect(getByText('HEALTH STATUS')).toBeTruthy();
     });
   });
 
@@ -99,10 +109,52 @@ describe('HealthScreen', () => {
     });
   });
 
-  it('renders empty state help text', async () => {
+  it('shows Refresh Now button', async () => {
     const { getByText } = render(<HealthScreen />);
     await waitFor(() => {
-      expect(getByText(/Connect WHOOP/)).toBeTruthy();
+      expect(getByText('Refresh Now')).toBeTruthy();
+    });
+  });
+
+  it('shows SYNC DETAILS toggle', async () => {
+    const { getByText } = render(<HealthScreen />);
+    await waitFor(() => {
+      expect(getByText(/SYNC DETAILS/)).toBeTruthy();
+    });
+  });
+
+  it('shows permission status in sync details when expanded', async () => {
+    const { getByText } = render(<HealthScreen />);
+    await waitFor(() => {
+      expect(getByText(/SYNC DETAILS/)).toBeTruthy();
+    });
+
+    fireEvent.press(getByText(/SYNC DETAILS/));
+    await waitFor(() => {
+      expect(getByText('Permission')).toBeTruthy();
+      expect(getByText('Last Ingest')).toBeTruthy();
+      expect(getByText('Activities')).toBeTruthy();
+    });
+  });
+
+  it('shows activity count from database', async () => {
+    executeSql.mockResolvedValue([{ rows: { length: 1, item: jest.fn().mockReturnValue({ cnt: 5 }) } }]);
+
+    const { getByText } = render(<HealthScreen />);
+    await waitFor(() => {
+      expect(getByText(/SYNC DETAILS/)).toBeTruthy();
+    });
+
+    fireEvent.press(getByText(/SYNC DETAILS/));
+    await waitFor(() => {
+      expect(getByText('5')).toBeTruthy();
+    });
+  });
+
+  it('renders why this matters text in empty state', async () => {
+    const { getByText } = render(<HealthScreen />);
+    await waitFor(() => {
+      expect(getByText('Why this matters')).toBeTruthy();
     });
   });
 });

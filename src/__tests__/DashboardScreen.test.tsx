@@ -26,17 +26,30 @@ jest.mock('../services/metaStateService', () => ({
   setMeta: jest.fn(),
 }));
 
+jest.mock('../services/checkInService', () => ({
+  saveCheckIn: jest.fn(),
+  getLastCheckIn: jest.fn().mockResolvedValue(null),
+  shouldShowCheckIn: jest.fn().mockReturnValue(false),
+  getCheckInContext: jest.fn().mockReturnValue([]),
+}));
+
+jest.mock('../components/DailyCheckIn', () => {
+  return () => null;
+});
+
 const { apiCached } = require('../services/apiClient');
+const { getMeta } = require('../services/metaStateService');
+const { shouldShowCheckIn, getLastCheckIn, getCheckInContext } = require('../services/checkInService');
 
 const COACHING_RESPONSE = {
   adaptation_score: 73,
   risk_band: 'optimal',
   coaching: {
-    headline: 'You\'re fully recovered. Push hard today.',
+    headline: 'Load ratio stable this week.',
     tone: 'encouraging',
     primary_factor: null,
     nudges: ['Chest volume is on track this week.'],
-    positive_notes: ['High recovery — you can afford to push today.'],
+    positive_notes: [],
   },
   policy_caps: {
     max_rpe: 9,
@@ -51,6 +64,10 @@ const COACHING_RESPONSE = {
 describe('DashboardScreen', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    getMeta.mockResolvedValue(null);
+    shouldShowCheckIn.mockReturnValue(false);
+    getLastCheckIn.mockResolvedValue(null);
+    getCheckInContext.mockReturnValue([]);
   });
 
   it('shows welcome state when no data available', async () => {
@@ -64,7 +81,7 @@ describe('DashboardScreen', () => {
     });
   });
 
-  it('renders score and coaching headline from server', async () => {
+  it('renders score and band label from server', async () => {
     apiCached.mockImplementation((url: string) => {
       if (url === '/api/coaching/today') return Promise.resolve(COACHING_RESPONSE);
       if (url === '/api/coaching/projections') return Promise.resolve({ projections: [], heavy_session_simulation: null });
@@ -76,11 +93,10 @@ describe('DashboardScreen', () => {
     await waitFor(() => {
       expect(getByText('73')).toBeTruthy();
     });
-    expect(getByText('OPTIMAL')).toBeTruthy();
-    expect(getByText("You're fully recovered. Push hard today.")).toBeTruthy();
+    expect(getByText('READY')).toBeTruthy();
   });
 
-  it('renders YOUR COACH label', async () => {
+  it('renders headline from coaching data', async () => {
     apiCached.mockImplementation((url: string) => {
       if (url === '/api/coaching/today') return Promise.resolve(COACHING_RESPONSE);
       return Promise.reject(new Error('skip'));
@@ -88,7 +104,7 @@ describe('DashboardScreen', () => {
 
     const { getByText } = render(<DashboardScreen />);
     await waitFor(() => {
-      expect(getByText('YOUR COACH')).toBeTruthy();
+      expect(getByText('Load ratio stable this week.')).toBeTruthy();
     });
   });
 
@@ -100,12 +116,12 @@ describe('DashboardScreen', () => {
 
     const { getByText } = render(<DashboardScreen />);
     await waitFor(() => {
-      expect(getByText('COACH INSIGHTS')).toBeTruthy();
+      expect(getByText('INSIGHTS')).toBeTruthy();
       expect(getByText('Chest volume is on track this week.')).toBeTruthy();
     });
   });
 
-  it('renders positive notes', async () => {
+  it('renders WHY section with no-penalty bullets', async () => {
     apiCached.mockImplementation((url: string) => {
       if (url === '/api/coaching/today') return Promise.resolve(COACHING_RESPONSE);
       return Promise.reject(new Error('skip'));
@@ -113,11 +129,11 @@ describe('DashboardScreen', () => {
 
     const { getByText } = render(<DashboardScreen />);
     await waitFor(() => {
-      expect(getByText('High recovery — you can afford to push today.')).toBeTruthy();
+      expect(getByText('WHY')).toBeTruthy();
     });
   });
 
-  it('shows AI-GENERATED PLAN for today plan', async () => {
+  it('shows TODAY label for plan card', async () => {
     const planResponse = {
       week: [{
         today: true,
@@ -138,33 +154,55 @@ describe('DashboardScreen', () => {
 
     const { getByText } = render(<DashboardScreen />);
     await waitFor(() => {
-      expect(getByText('AI-GENERATED PLAN')).toBeTruthy();
-      expect(getByText('PUSH')).toBeTruthy();
+      expect(getByText('TODAY')).toBeTruthy();
+      expect(getByText(/PUSH/)).toBeTruthy();
     });
   });
 
-  it('renders coach attribution text', async () => {
+  it('does not show AI attribution text', async () => {
     apiCached.mockImplementation((url: string) => {
       if (url === '/api/coaching/today') return Promise.resolve(COACHING_RESPONSE);
       return Promise.reject(new Error('skip'));
     });
 
-    const { getByText } = render(<DashboardScreen />);
+    const { queryByText } = render(<DashboardScreen />);
     await waitFor(() => {
-      expect(getByText('AI analysis based on your training history, recovery data, and goals')).toBeTruthy();
+      expect(queryByText(/AI analysis/)).toBeNull();
+      expect(queryByText(/AI-GENERATED/)).toBeNull();
     });
   });
 
-  it('renders score explanation text', async () => {
+  it('shows fallback headline when no penalties', async () => {
     apiCached.mockImplementation((url: string) => {
-      if (url === '/api/coaching/today') return Promise.resolve(COACHING_RESPONSE);
+      if (url === '/api/coaching/today') return Promise.resolve({
+        ...COACHING_RESPONSE,
+        coaching: { ...COACHING_RESPONSE.coaching, headline: null },
+      });
       return Promise.reject(new Error('skip'));
     });
 
     const { getByText } = render(<DashboardScreen />);
     await waitFor(() => {
-      expect(getByText('READINESS SCORE')).toBeTruthy();
-      expect(getByText('Score = 100 minus recovery penalties. Tap the score to learn more.')).toBeTruthy();
+      expect(getByText('No recovery penalties active.')).toBeTruthy();
+    });
+  });
+
+  it('renders check-in context in WHY section when check-in has low energy', async () => {
+    getLastCheckIn.mockResolvedValue({ energy: 1, sleepQuality: 3, soreness: 3 });
+    getCheckInContext.mockReturnValue(['Low energy noted']);
+
+    apiCached.mockImplementation((url: string) => {
+      if (url === '/api/coaching/today') return Promise.resolve({
+        ...COACHING_RESPONSE,
+        coaching: { ...COACHING_RESPONSE.coaching, headline: null },
+      });
+      return Promise.reject(new Error('skip'));
+    });
+
+    const { getAllByText } = render(<DashboardScreen />);
+    await waitFor(() => {
+      // Appears in both headline and WHY bullet
+      expect(getAllByText(/Low energy noted/).length).toBeGreaterThanOrEqual(1);
     });
   });
 });

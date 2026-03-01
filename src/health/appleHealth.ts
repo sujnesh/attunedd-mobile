@@ -20,7 +20,7 @@ export type PermissionStatus = 'granted' | 'denied' | 'not_determined' | 'unavai
 export async function getPermissionStatus(): Promise<PermissionStatus> {
   try {
     const isAvailable = await new Promise<boolean>((resolve) => {
-      AppleHealthKit.isAvailable((err: string, available: boolean) => {
+      AppleHealthKit.isAvailable((err: Object, available: boolean) => {
         resolve(!err && available);
       });
     });
@@ -29,7 +29,7 @@ export async function getPermissionStatus(): Promise<PermissionStatus> {
     const authStatus = await new Promise<number>((resolve) => {
       AppleHealthKit.getAuthStatus(
         { permissions: PERMISSIONS.permissions },
-        (err: string, result: { permissions: { read: number[] } }) => {
+        (err: Object, result: { permissions: { read: number[] } }) => {
           if (err || !result?.permissions?.read) {
             resolve(0);
             return;
