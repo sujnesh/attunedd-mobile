@@ -95,6 +95,9 @@ export default function TrainHomeScreen({ navigation }: TrainHomeProps) {
             {formatSessionType(todaySession.session_type)}
           </Text>
           {planName && <Text style={styles.planSubtext}>{planName}</Text>}
+          {todaySession.rationale && (
+            <Text style={styles.planRationale}>{todaySession.rationale}</Text>
+          )}
           {todaySession.workout_status === 'completed' && (
             <Text style={styles.planCompleted}>COMPLETED</Text>
           )}
@@ -104,7 +107,7 @@ export default function TrainHomeScreen({ navigation }: TrainHomeProps) {
             .map((ex, i) => (
               <Text key={i} style={styles.planExercise}>
                 {ex.name}
-                {ex.sets && ex.rep_range ? `  ${ex.sets}×${ex.rep_range}` : ''}
+                {ex.sets && ex.rep_range ? `  ${ex.sets}\u00D7${ex.rep_range}` : ''}
                 {ex.duration_minutes ? `  ${ex.duration_minutes} min` : ''}
               </Text>
             ))}
@@ -114,7 +117,11 @@ export default function TrainHomeScreen({ navigation }: TrainHomeProps) {
       {todaySession?.rest_day && (
         <View style={styles.restBlock}>
           <Text style={styles.restLabel}>REST DAY</Text>
-          <Text style={styles.restHint}>Recovery is part of the program</Text>
+          {todaySession.rationale ? (
+            <Text style={styles.restHint}>{todaySession.rationale}</Text>
+          ) : (
+            <Text style={styles.restHint}>Recovery is part of the program</Text>
+          )}
         </View>
       )}
 
@@ -288,6 +295,13 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: MONO,
     marginBottom: 12,
+  },
+  planRationale: {
+    color: '#888888',
+    fontSize: 11,
+    lineHeight: 16,
+    marginBottom: 10,
+    fontStyle: 'italic',
   },
   planCompleted: {
     color: '#2ECC71',

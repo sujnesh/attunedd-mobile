@@ -16,15 +16,20 @@ import { useActiveWorkout } from '../../workout/controller/useActiveWorkout';
 import type { Deviation } from '../../workout/core/deviationEngine';
 import type { SessionSet } from '../../workout/core/sessionState';
 import type { PlannedWorkoutProps } from '../../navigation/types';
-import type { PlanBlock, CurrentPlanResponse } from '../../types/api';
+import type { PlanBlock, PlanExercise, CurrentPlanResponse, PlanDayData } from '../../types/api';
 import { apiCached } from '../../services/apiClient';
 import { useSessionTimer } from '../../workout/hooks/useSessionTimer';
+import InfoChip from '../../components/InfoChip';
+import { useEducation } from '../../components/EducationProvider';
+import TutorialHint from '../../components/TutorialHint';
+import { getMeta, setMeta } from '../../services/metaStateService';
 
 const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
 
 export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorkoutProps) {
   const { draftId } = route.params;
   const insets = useSafeAreaInsets();
+  const { openTopic } = useEducation();
   const {
     session,
     nudge,
@@ -49,12 +54,21 @@ export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorko
     rpe: number;
   } | null>(null);
   const [planBlocks, setPlanBlocks] = useState<PlanBlock[]>([]);
-  const [showPlan, setShowPlan] = useState(true);
+  const [todayRationale, setTodayRationale] = useState<string | null>(null);
+  const [isFirstWorkout, setIsFirstWorkout] = useState(false);
+  const [setsLogged, setSetsLogged] = useState(0);
 
   useEffect(() => {
     initSession('planned', draftId);
-    fetchTodayBlocks(setPlanBlocks);
+    fetchTodayData(setPlanBlocks, setTodayRationale);
+    getMeta('first_workout_completed').then((val) => {
+      setIsFirstWorkout(val !== 'true');
+    });
   }, [draftId, initSession]);
+
+  useEffect(() => {
+    setSetsLogged(session?.sets.length ?? 0);
+  }, [session?.sets.length]);
 
   const handleSubmit = async () => {
     const parsed = parseSetInput(input.trim());
@@ -91,6 +105,11 @@ export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorko
     setPendingParsed(null);
   };
 
+  const handleExerciseTap = (exerciseName: string) => {
+    setInput(exerciseName.toLowerCase() + ' ');
+    inputRef.current?.focus();
+  };
+
   const handleFinish = () => {
     const setCount = session?.sets.length ?? 0;
     Alert.alert(
@@ -105,6 +124,9 @@ export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorko
 
   const doFinish = async () => {
     try {
+      if (isFirstWorkout) {
+        await setMeta('first_workout_completed', 'true');
+      }
       const debrief = await finishSession();
       if (debrief) {
         navigation.replace('PostWorkoutDebrief', { debrief });
@@ -124,7 +146,17 @@ export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorko
     ? Math.round((session.cumulativeStress / session.allowedStress) * 100)
     : null;
 
-  const exercises = groupByExercise(session.sets);
+  const loggedByExercise = groupByExercise(session.sets);
+  const mainExercises = planBlocks
+    .filter((b) => b.name === 'Main')
+    .flatMap((b) => b.exercises)
+    .filter((ex) => ex.sets);
+  const prescribedNames = new Set(mainExercises.map((ex) => ex.name.toLowerCase()));
+  const additionalExercises = loggedByExercise.filter(
+    ([name]) => !prescribedNames.has(name.toLowerCase()),
+  );
+
+  const halfBudget = session.allowedStress > 0 && stressPct !== null && stressPct >= 45 && stressPct <= 55;
 
   return (
     <KeyboardAvoidingView
@@ -137,12 +169,14 @@ export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorko
           <Text style={styles.timerText}>{timer}</Text>
         </View>
         <View style={styles.stressRow}>
-          <Text style={styles.stressValue}>
-            {Math.round(session.cumulativeStress)}
-            {session.allowedStress > 0 && (
-              <Text style={styles.stressDenom}> / {Math.round(session.allowedStress)}</Text>
-            )}
-          </Text>
+          <InfoChip topic="stress_units">
+            <Text style={styles.stressValue}>
+              {Math.round(session.cumulativeStress)}
+              {session.allowedStress > 0 && (
+                <Text style={styles.stressDenom}> / {Math.round(session.allowedStress)}</Text>
+              )}
+            </Text>
+          </InfoChip>
           {stressPct != null && (
             <Text style={[styles.stressPct, stressPct >= 85 && styles.stressWarn]}>
               {stressPct}%
@@ -150,8 +184,12 @@ export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorko
           )}
         </View>
         <View style={styles.capsRow}>
-          <Text style={styles.capChip}>RPE {session.caps.max_rpe}</Text>
-          <Text style={styles.capChip}>{session.caps.max_allowed_stress_pct}%</Text>
+          <InfoChip topic="rpe">
+            <Text style={styles.capChip}>RPE {session.caps.max_rpe}</Text>
+          </InfoChip>
+          <InfoChip topic="stress_budget">
+            <Text style={styles.capChip}>{session.caps.max_allowed_stress_pct}%</Text>
+          </InfoChip>
           {session.caps.block_heavy_neural && (
             <Text style={[styles.capChip, styles.capAlert]}>NO HEAVY</Text>
           )}
@@ -165,56 +203,79 @@ export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorko
       )}
 
       <ScrollView style={styles.setList} keyboardShouldPersistTaps="handled">
-        {planBlocks.length > 0 && (
-          <View style={styles.prescribedSection}>
-            <Pressable onPress={() => setShowPlan(!showPlan)} style={styles.prescribedHeader}>
-              <Text style={styles.prescribedLabel}>PRESCRIBED</Text>
-              <Text style={styles.prescribedToggle}>{showPlan ? 'HIDE' : 'SHOW'}</Text>
-            </Pressable>
-            {showPlan && planBlocks
-              .filter((b) => b.name === 'Main')
-              .flatMap((b) => b.exercises)
-              .map((ex, i) => (
-                <View key={i} style={styles.prescribedRow}>
-                  <Text style={styles.prescribedName}>{ex.name}</Text>
-                  <Text style={styles.prescribedDetail}>
-                    {ex.sets && ex.rep_range
-                      ? `${ex.sets}×${ex.rep_range} @RPE ${ex.rpe_target ?? '—'}`
-                      : ex.duration_minutes
-                        ? `${ex.duration_minutes} min${ex.zone ? ` ${ex.zone}` : ''}`
-                        : ''}
-                  </Text>
-                </View>
-              ))}
-          </View>
+        {todayRationale && (
+          <Text style={styles.rationale}>{todayRationale}</Text>
         )}
 
-        {exercises.length > 0 && (
-          <Text style={styles.loggedLabel}>LOGGED</Text>
-        )}
-        {exercises.map(([name, sets]) => (
-          <View key={name} style={styles.exerciseBlock}>
-            <View style={styles.exerciseHeader}>
-              <Text style={styles.exerciseName}>{name.toUpperCase()}</Text>
-              {fatigueExercises.has(name) && (
-                <Text style={styles.fatigueTag}>FATIGUE</Text>
-              )}
-            </View>
-            {sets.map((s, i) => (
-              <View key={i} style={styles.setRow}>
-                <Text style={styles.setNum}>#{s.setNumber}</Text>
-                <Text style={styles.setText}>
-                  {s.weight != null ? `${s.weight}x` : ''}{s.reps}@{s.rpe}
-                </Text>
-                <Text style={styles.setStress}>{Math.round(s.stressUnits)}</Text>
-                {s.capOverride && <Text style={styles.overrideTag}>OVR</Text>}
+        <TutorialHint
+          hintKey="first_workout_exercises"
+          message="These exercises were picked for your goals. Tap any for details."
+          visible={isFirstWorkout && mainExercises.length > 0 && setsLogged === 0}
+        />
+
+        {mainExercises.map((ex, i) => {
+          const logged = loggedByExercise.find(
+            ([name]) => name.toLowerCase() === ex.name.toLowerCase(),
+          );
+          const loggedSets = logged?.[1] ?? [];
+          const isFatigued = fatigueExercises.has(ex.name);
+
+          return (
+            <ExerciseCard
+              key={i}
+              exercise={ex}
+              loggedSets={loggedSets}
+              isFatigued={isFatigued}
+              onTap={() => handleExerciseTap(ex.name)}
+              onInfoTap={() => {
+                if (ex.description || ex.coaching_tip) {
+                  openTopic('rpe'); // fallback; ideally exercise-specific
+                }
+              }}
+            />
+          );
+        })}
+
+        {additionalExercises.length > 0 && (
+          <>
+            <Text style={styles.additionalLabel}>ADDITIONAL</Text>
+            {additionalExercises.map(([name, sets]) => (
+              <View key={name} style={styles.exerciseBlock}>
+                <View style={styles.exerciseHeader}>
+                  <Text style={styles.exerciseName}>{name.toUpperCase()}</Text>
+                  {fatigueExercises.has(name) && (
+                    <Text style={styles.fatigueTag}>FATIGUE</Text>
+                  )}
+                </View>
+                {sets.map((s, j) => (
+                  <SetRowView key={j} set={s} />
+                ))}
               </View>
             ))}
-          </View>
-        ))}
-        {exercises.length === 0 && (
+          </>
+        )}
+
+        {mainExercises.length === 0 && loggedByExercise.length === 0 && (
           <Text style={styles.emptyHint}>Log sets below{'\n'}e.g. bench press 135x5@8</Text>
         )}
+
+        <TutorialHint
+          hintKey="first_workout_input"
+          message="Type your set: 80x8@7 means 80kg for 8 reps at effort level 7"
+          visible={isFirstWorkout && setsLogged === 0 && mainExercises.length > 0}
+        />
+
+        <TutorialHint
+          hintKey="first_workout_stress"
+          message={`Nice! That added stress to your budget. You have ${session.allowedStress > 0 ? Math.round(session.allowedStress - session.cumulativeStress) : '—'} remaining.`}
+          visible={isFirstWorkout && setsLogged === 1}
+        />
+
+        <TutorialHint
+          hintKey="first_workout_halfway"
+          message="Halfway through today's budget. Pacing well."
+          visible={isFirstWorkout && halfBudget}
+        />
       </ScrollView>
 
       {deviation && (
@@ -266,13 +327,95 @@ export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorko
   );
 }
 
-async function fetchTodayBlocks(setBlocks: (b: PlanBlock[]) => void) {
+function ExerciseCard({
+  exercise,
+  loggedSets,
+  isFatigued,
+  onTap,
+  onInfoTap,
+}: {
+  exercise: PlanExercise;
+  loggedSets: SessionSet[];
+  isFatigued: boolean;
+  onTap: () => void;
+  onInfoTap: () => void;
+}) {
+  const target = exercise.sets && exercise.rep_range
+    ? `${exercise.sets}\u00D7${exercise.rep_range}`
+    : '';
+
+  return (
+    <Pressable onPress={onTap} style={styles.card}>
+      <View style={styles.cardHeader}>
+        <View style={styles.cardTitleRow}>
+          <Text style={styles.cardName}>{exercise.name.toUpperCase()}</Text>
+          {target ? <Text style={styles.cardTarget}>{target}</Text> : null}
+        </View>
+        <View style={styles.cardMeta}>
+          {exercise.rpe_target && (
+            <InfoChip topic="rpe">
+              <Text style={styles.cardRpe}>@RPE {exercise.rpe_target}</Text>
+            </InfoChip>
+          )}
+          {(exercise.description || exercise.coaching_tip) && (
+            <Pressable onPress={onInfoTap} hitSlop={8}>
+              <Text style={styles.infoBtn}>?</Text>
+            </Pressable>
+          )}
+        </View>
+      </View>
+
+      {exercise.description && (
+        <Text style={styles.cardContext} numberOfLines={1}>
+          {exercise.description}
+        </Text>
+      )}
+
+      {isFatigued && (
+        <View style={styles.fatigueRow}>
+          <InfoChip topic="fatigue_detected">
+            <Text style={styles.fatigueTag}>FATIGUE DETECTED</Text>
+          </InfoChip>
+        </View>
+      )}
+
+      {loggedSets.map((s, i) => (
+        <SetRowView key={i} set={s} />
+      ))}
+
+      {loggedSets.length < (exercise.sets ?? 0) && (
+        <Text style={styles.cardSlot}>
+          #{loggedSets.length + 1}  tap to log
+        </Text>
+      )}
+    </Pressable>
+  );
+}
+
+function SetRowView({ set }: { set: SessionSet }) {
+  return (
+    <View style={styles.setRow}>
+      <Text style={styles.setNum}>#{set.setNumber}</Text>
+      <Text style={styles.setText}>
+        {set.weight != null ? `${set.weight}\u00D7` : ''}{set.reps}@{set.rpe}
+      </Text>
+      <Text style={styles.setStress}>{Math.round(set.stressUnits)}</Text>
+      {set.capOverride && <Text style={styles.overrideTag}>OVR</Text>}
+    </View>
+  );
+}
+
+async function fetchTodayData(
+  setBlocks: (b: PlanBlock[]) => void,
+  setRationale: (r: string | null) => void,
+) {
   try {
     const body = await apiCached<CurrentPlanResponse>('/api/plans/current', 'cache_plans_current');
-    const today = body.week?.find((d) => d.today);
+    const today = body.week?.find((d: PlanDayData) => d.today);
     if (today?.blocks) {
       setBlocks(today.blocks);
     }
+    setRationale(today?.rationale ?? null);
   } catch {
     // Non-fatal
   }
@@ -380,50 +523,85 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 16,
   },
-  prescribedSection: {
-    marginBottom: 20,
-    borderWidth: 0.5,
-    borderColor: '#1A3A1A',
-    padding: 12,
+  rationale: {
+    color: '#888888',
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 16,
+    fontStyle: 'italic',
   },
-  prescribedHeader: {
+  card: {
+    borderWidth: 0.5,
+    borderColor: '#222222',
+    padding: 12,
+    marginBottom: 12,
+  },
+  cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
+    alignItems: 'flex-start',
+    marginBottom: 4,
   },
-  prescribedLabel: {
-    color: '#2ECC71',
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 2,
+  cardTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
+    flex: 1,
   },
-  prescribedToggle: {
-    color: '#555555',
-    fontSize: 9,
+  cardName: {
+    color: '#EAEAEA',
+    fontSize: 12,
     fontWeight: '600',
     letterSpacing: 1,
   },
-  prescribedRow: {
-    paddingVertical: 4,
-  },
-  prescribedName: {
+  cardTarget: {
     color: '#888888',
     fontSize: 11,
-    fontWeight: '600',
     fontFamily: MONO,
   },
-  prescribedDetail: {
-    color: '#555555',
+  cardMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  cardRpe: {
+    color: '#888888',
     fontSize: 10,
     fontFamily: MONO,
-    marginTop: 1,
   },
-  loggedLabel: {
+  infoBtn: {
+    color: '#555555',
+    fontSize: 14,
+    fontWeight: '600',
+    width: 20,
+    height: 20,
+    textAlign: 'center',
+    lineHeight: 20,
+    borderWidth: 0.5,
+    borderColor: '#333333',
+    borderRadius: 10,
+  },
+  cardContext: {
+    color: '#555555',
+    fontSize: 10,
+    lineHeight: 14,
+    marginBottom: 6,
+  },
+  fatigueRow: {
+    marginBottom: 4,
+  },
+  cardSlot: {
+    color: '#333333',
+    fontSize: 11,
+    fontFamily: MONO,
+    paddingVertical: 6,
+  },
+  additionalLabel: {
     color: '#555555',
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 2,
+    marginTop: 16,
     marginBottom: 12,
   },
   exerciseBlock: {

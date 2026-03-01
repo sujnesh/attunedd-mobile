@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { PostWorkoutDebriefProps } from '../../navigation/types';
+import InfoChip from '../../components/InfoChip';
+import { getMeta } from '../../services/metaStateService';
 
 const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
 
@@ -24,6 +26,14 @@ const BAND_COLORS: Record<string, string> = {
 export default function PostWorkoutDebriefScreen({ route, navigation }: PostWorkoutDebriefProps) {
   const { debrief } = route.params;
   const insets = useSafeAreaInsets();
+  const [isFirstWorkout, setIsFirstWorkout] = useState(false);
+
+  useEffect(() => {
+    getMeta('debrief_seen_count').then((val) => {
+      const count = parseInt(val ?? '0', 10);
+      setIsFirstWorkout(count === 0);
+    });
+  }, []);
 
   const effortColor = EFFORT_COLORS[debrief.effort_rating] ?? '#888888';
   const bandAfterColor = BAND_COLORS[debrief.band_after] ?? '#888888';
@@ -69,8 +79,16 @@ export default function PostWorkoutDebriefScreen({ route, navigation }: PostWork
 
       {debrief.band_dropped && (
         <View style={styles.bandDropBadge}>
-          <Text style={styles.bandDropText}>BAND DROP</Text>
+          <InfoChip topic="risk_band">
+            <Text style={styles.bandDropText}>BAND DROP</Text>
+          </InfoChip>
         </View>
+      )}
+
+      {isFirstWorkout && (
+        <Text style={styles.coachMessage}>
+          Welcome to coached training. Your score will become more accurate as we learn your patterns over the next few sessions.
+        </Text>
       )}
 
       <View style={styles.section}>
@@ -81,13 +99,17 @@ export default function PostWorkoutDebriefScreen({ route, navigation }: PostWork
           </Text>
         </View>
         <View style={styles.metricRow}>
-          <Text style={styles.metricLabel}>STRESS USED</Text>
+          <InfoChip topic="stress_units">
+            <Text style={styles.metricLabel}>STRESS USED</Text>
+          </InfoChip>
           <Text style={styles.metricValue}>
             {Math.round(debrief.stress_utilization * 100)}%
           </Text>
         </View>
         <View style={styles.metricRow}>
-          <Text style={styles.metricLabel}>SETS LOGGED</Text>
+          <InfoChip topic="sets">
+            <Text style={styles.metricLabel}>SETS LOGGED</Text>
+          </InfoChip>
           <Text style={styles.metricValue}>{debrief.sets_logged}</Text>
         </View>
       </View>
@@ -240,5 +262,14 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     letterSpacing: 3,
     fontFamily: MONO,
+  },
+  coachMessage: {
+    color: '#2ECC71',
+    fontSize: 12,
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 16,
+    paddingHorizontal: 16,
+    fontStyle: 'italic',
   },
 });
