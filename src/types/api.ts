@@ -110,6 +110,8 @@ export interface PlanExercise {
   zone?: string;
   intervals?: string;
   notes?: string | null;
+  description?: string;
+  coaching_tip?: string;
 }
 
 export interface PlanBlock {
@@ -125,6 +127,7 @@ export interface PlanDayData {
   blocks: PlanBlock[];
   workout_status: string | null;
   today: boolean;
+  rationale?: string;
 }
 
 export interface PlanData {
