@@ -54,6 +54,7 @@ export default function HealthScreen() {
   const [lastHealthError, setLastHealthError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [syncExpanded, setSyncExpanded] = useState(false);
+  const [granting, setGranting] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -138,16 +139,29 @@ export default function HealthScreen() {
   }, [refreshing, load]);
 
   const handleGrantAccess = useCallback(async () => {
-    if (Platform.OS === 'ios') {
-      try {
-        const { initAppleHealth } = await import('../health/appleHealth');
-        await initAppleHealth();
-        await load();
-      } catch {
-        // non-fatal
+    if (Platform.OS !== 'ios' || granting) return;
+    setGranting(true);
+    try {
+      const { initAppleHealth } = await import('../health/appleHealth');
+      const granted = await initAppleHealth();
+      if (granted) {
+        // Try immediate ingestion after granting
+        try {
+          const authToken = await getMeta('auth_token');
+          if (authToken) {
+            await ingestDeviceActivities(30, authToken);
+          }
+        } catch {
+          // ingestion failure is non-fatal
+        }
       }
+      await load();
+    } catch {
+      // non-fatal
+    } finally {
+      setGranting(false);
     }
-  }, [load]);
+  }, [granting, load]);
 
   if (!loaded) return <View style={styles.root} />;
 
@@ -285,28 +299,24 @@ export default function HealthScreen() {
         <View style={styles.statusSection}>
           <Text style={styles.statusTitle}>HEALTH STATUS</Text>
 
-          {permissionStatus === 'not_determined' && Platform.OS === 'ios' && (
+          {permissionStatus !== 'granted' && Platform.OS === 'ios' && (
             <>
               <Text style={styles.statusMessage}>
-                Tap to grant Apple Health access so we can read your activity data.
+                {permissionStatus === 'denied'
+                  ? 'Apple Health access was denied. Open Settings to enable it.'
+                  : 'Tap to grant Apple Health access so we can read your activity data.'}
               </Text>
               <Pressable
                 style={({ pressed }) => [styles.connectBtn, pressed && styles.connectBtnPressed]}
-                onPress={handleGrantAccess}>
-                <Text style={styles.connectBtnText}>Grant Access</Text>
-              </Pressable>
-            </>
-          )}
-
-          {permissionStatus === 'denied' && (
-            <>
-              <Text style={styles.statusMessage}>
-                Apple Health access was denied. Open Settings to enable it.
-              </Text>
-              <Pressable
-                style={({ pressed }) => [styles.connectBtn, pressed && styles.connectBtnPressed]}
-                onPress={() => Linking.openSettings()}>
-                <Text style={styles.connectBtnText}>Open Settings</Text>
+                onPress={permissionStatus === 'denied' ? () => Linking.openSettings() : handleGrantAccess}
+                disabled={granting}>
+                {granting ? (
+                  <ActivityIndicator size="small" color="#0A0A0A" />
+                ) : (
+                  <Text style={styles.connectBtnText}>
+                    {permissionStatus === 'denied' ? 'Open Settings' : 'Grant Access'}
+                  </Text>
+                )}
               </Pressable>
             </>
           )}
@@ -352,9 +362,23 @@ export default function HealthScreen() {
         <View style={styles.syncSection}>
           <View style={styles.syncRow}>
             <Text style={styles.syncLabel}>Permission</Text>
-            <Text style={[styles.syncValue, { color: permissionColor }]}>
-              {permissionLabel}
-            </Text>
+            {permissionStatus === 'not_determined' && Platform.OS === 'ios' ? (
+              <Pressable onPress={handleGrantAccess} disabled={granting}>
+                <Text style={[styles.syncValue, { color: '#2ECC71' }]}>
+                  {granting ? 'GRANTING...' : 'TAP TO GRANT'}
+                </Text>
+              </Pressable>
+            ) : permissionStatus === 'denied' ? (
+              <Pressable onPress={() => Linking.openSettings()}>
+                <Text style={[styles.syncValue, { color: '#E74C3C' }]}>
+                  DENIED — TAP TO FIX
+                </Text>
+              </Pressable>
+            ) : (
+              <Text style={[styles.syncValue, { color: permissionColor }]}>
+                {permissionLabel}
+              </Text>
+            )}
           </View>
           <View style={styles.syncRow}>
             <Text style={styles.syncLabel}>WHOOP</Text>

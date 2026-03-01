@@ -1,11 +1,35 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Alert,
+  Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { api, apiCached } from '../services/apiClient';
 import { logout } from '../navigation/AppNavigator';
 
 const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
+
+interface Demographics {
+  age?: number | null;
+  gender?: string | null;
+  height_cm?: number | null;
+  weight_kg?: number | null;
+}
+
+interface CurrentLifts {
+  bench?: number | null;
+  squat?: number | null;
+  deadlift?: number | null;
+  unit?: 'kg' | 'lb';
+}
 
 interface ProfileData {
   user: { id: number; email: string };
@@ -17,7 +41,10 @@ interface ProfileData {
     days_per_week: number;
     equipment: string;
     session_minutes: number;
+    training_history?: string | null;
+    current_lifts?: CurrentLifts | null;
   } | null;
+  demographics?: Demographics | null;
   plan: {
     id: number;
     name: string;
@@ -26,6 +53,14 @@ interface ProfileData {
 }
 
 const PREF_OPTIONS: Record<string, { label: string; values: { value: string; label: string }[] }> = {
+  training_type: {
+    label: 'TYPE',
+    values: [
+      { value: 'bodybuilding', label: 'BODYBUILDING' },
+      { value: 'running', label: 'RUNNING' },
+      { value: 'hybrid', label: 'HYBRID' },
+    ],
+  },
   primary_goal: {
     label: 'GOAL',
     values: [
@@ -71,6 +106,13 @@ const PREF_OPTIONS: Record<string, { label: string; values: { value: string; lab
   },
 };
 
+const GENDER_OPTIONS = [
+  { value: 'male', label: 'MALE' },
+  { value: 'female', label: 'FEMALE' },
+  { value: 'other', label: 'OTHER' },
+  { value: 'prefer_not_to_say', label: 'SKIP' },
+];
+
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const [profile, setProfile] = useState<ProfileData | null>(null);
@@ -79,11 +121,45 @@ export default function SettingsScreen() {
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  // Demographics editing state
+  const [editAge, setEditAge] = useState('');
+  const [editGender, setEditGender] = useState('');
+  const [editHeightCm, setEditHeightCm] = useState('');
+  const [editWeightKg, setEditWeightKg] = useState('');
+
+  // Lifts editing state
+  const [editBench, setEditBench] = useState('');
+  const [editSquat, setEditSquat] = useState('');
+  const [editDeadlift, setEditDeadlift] = useState('');
+  const [editLiftUnit, setEditLiftUnit] = useState<'kg' | 'lb'>('kg');
+
+  // Training history editing state
+  const [editHistory, setEditHistory] = useState('');
+
+  const populateEditState = useCallback((p: ProfileData) => {
+    const d = p.demographics;
+    setEditAge(d?.age != null ? String(d.age) : '');
+    setEditGender(d?.gender ?? '');
+    setEditHeightCm(d?.height_cm != null ? String(d.height_cm) : '');
+    setEditWeightKg(d?.weight_kg != null ? String(d.weight_kg) : '');
+
+    const lifts = p.preferences?.current_lifts;
+    setEditBench(lifts?.bench != null ? String(lifts.bench) : '');
+    setEditSquat(lifts?.squat != null ? String(lifts.squat) : '');
+    setEditDeadlift(lifts?.deadlift != null ? String(lifts.deadlift) : '');
+    setEditLiftUnit(lifts?.unit ?? 'kg');
+
+    setEditHistory(p.preferences?.training_history ?? '');
+  }, []);
+
   const fetchProfile = useCallback(() => {
     apiCached<ProfileData>('/api/profile', 'cache_profile')
-      .then(setProfile)
+      .then((p) => {
+        setProfile(p);
+        populateEditState(p);
+      })
       .catch(() => {});
-  }, []);
+  }, [populateEditState]);
 
   useFocusEffect(
     useCallback(() => {
@@ -152,33 +228,66 @@ export default function SettingsScreen() {
     ]);
   };
 
-  const handlePrefSelect = async (key: string, value: string) => {
+  const saveAll = async (overrides?: { prefKey?: string; prefValue?: string }) => {
     if (!profile?.preferences || saving) return;
     setSaving(true);
     setEditingKey(null);
 
+    const prefs = profile.preferences;
     const numericKeys = ['days_per_week', 'session_minutes'];
-    const payload: Record<string, unknown> = {
-      ...profile.preferences,
-      [key]: numericKeys.includes(key) ? parseInt(value, 10) : value,
-    };
+    const prefPayload: Record<string, unknown> = { ...prefs };
+
+    if (overrides?.prefKey) {
+      const v = overrides.prefValue!;
+      prefPayload[overrides.prefKey] = numericKeys.includes(overrides.prefKey)
+        ? parseInt(v, 10) : v;
+    }
+
+    // Build current lifts
+    const b = parseFloat(editBench);
+    const s = parseFloat(editSquat);
+    const d = parseFloat(editDeadlift);
+    if (b || s || d) {
+      prefPayload.current_lifts = {
+        bench: b || undefined,
+        squat: s || undefined,
+        deadlift: d || undefined,
+        unit: editLiftUnit,
+      };
+    }
+
+    prefPayload.training_history = editHistory || undefined;
+
+    const demographics: Record<string, unknown> = {};
+    const ageNum = parseInt(editAge, 10);
+    if (!isNaN(ageNum) && ageNum > 0) demographics.age = ageNum;
+    if (editGender) demographics.gender = editGender;
+    const hNum = parseInt(editHeightCm, 10);
+    if (!isNaN(hNum) && hNum > 0) demographics.height_cm = hNum;
+    const wNum = parseFloat(editWeightKg);
+    if (!isNaN(wNum) && wNum > 0) demographics.weight_kg = wNum;
 
     try {
       await api('/api/onboarding/preferences', {
         method: 'POST',
-        body: { preferences: payload },
+        body: { preferences: prefPayload, demographics },
       });
-      // Refresh profile to get updated data + potentially regenerated plan
       const fresh = await api<ProfileData>('/api/profile');
       setProfile(fresh);
+      populateEditState(fresh);
     } catch {
-      Alert.alert('Error', 'Failed to update preference');
+      Alert.alert('Error', 'Failed to update settings');
     } finally {
       setSaving(false);
     }
   };
 
+  const handlePrefSelect = (key: string, value: string) => {
+    saveAll({ prefKey: key, prefValue: value });
+  };
+
   const prefs = profile?.preferences;
+  const demo = profile?.demographics;
   const whoopConnected = profile?.whoop_connected ?? false;
 
   return (
@@ -213,6 +322,116 @@ export default function SettingsScreen() {
           </View>
         </View>
       )}
+
+      {/* Demographics — editable */}
+      <View style={styles.section}>
+        <Text style={styles.sectionHeader}>ABOUT YOU</Text>
+        <Text style={styles.editHint}>Tap a value to edit</Text>
+
+        <Pressable
+          onPress={() => setEditingKey(editingKey === 'age' ? null : 'age')}
+          style={styles.row}>
+          <Text style={styles.label}>AGE</Text>
+          <Text style={[styles.value, styles.editable]}>
+            {editAge || '\u2014'}
+          </Text>
+        </Pressable>
+        {editingKey === 'age' && (
+          <View style={styles.inlineEdit}>
+            <TextInput
+              style={styles.inlineInput}
+              keyboardType="numeric"
+              placeholder="\u2014"
+              placeholderTextColor="#444444"
+              value={editAge}
+              onChangeText={setEditAge}
+              maxLength={3}
+              autoFocus
+            />
+            <Pressable style={styles.saveBtn} onPress={() => saveAll()}>
+              <Text style={styles.saveBtnText}>{saving ? '...' : 'SAVE'}</Text>
+            </Pressable>
+          </View>
+        )}
+
+        <Pressable
+          onPress={() => setEditingKey(editingKey === 'gender' ? null : 'gender')}
+          style={styles.row}>
+          <Text style={styles.label}>GENDER</Text>
+          <Text style={[styles.value, styles.editable]}>
+            {editGender ? formatValue(editGender) : '\u2014'}
+          </Text>
+        </Pressable>
+        {editingKey === 'gender' && (
+          <View style={styles.optionsRow}>
+            {GENDER_OPTIONS.map((opt) => {
+              const isSelected = opt.value === editGender;
+              return (
+                <Pressable
+                  key={opt.value}
+                  onPress={() => { setEditGender(opt.value); setEditingKey(null); saveAll(); }}
+                  style={[styles.optionChip, isSelected && styles.optionChipSelected]}>
+                  <Text style={[styles.optionChipText, isSelected && styles.optionChipTextSelected]}>
+                    {opt.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
+
+        <Pressable
+          onPress={() => setEditingKey(editingKey === 'height' ? null : 'height')}
+          style={styles.row}>
+          <Text style={styles.label}>HEIGHT</Text>
+          <Text style={[styles.value, styles.editable]}>
+            {editHeightCm ? `${editHeightCm} cm` : '\u2014'}
+          </Text>
+        </Pressable>
+        {editingKey === 'height' && (
+          <View style={styles.inlineEdit}>
+            <TextInput
+              style={styles.inlineInput}
+              keyboardType="numeric"
+              placeholder="cm"
+              placeholderTextColor="#444444"
+              value={editHeightCm}
+              onChangeText={setEditHeightCm}
+              maxLength={3}
+              autoFocus
+            />
+            <Pressable style={styles.saveBtn} onPress={() => saveAll()}>
+              <Text style={styles.saveBtnText}>{saving ? '...' : 'SAVE'}</Text>
+            </Pressable>
+          </View>
+        )}
+
+        <Pressable
+          onPress={() => setEditingKey(editingKey === 'weight' ? null : 'weight')}
+          style={styles.row}>
+          <Text style={styles.label}>WEIGHT</Text>
+          <Text style={[styles.value, styles.editable]}>
+            {editWeightKg ? `${editWeightKg} kg` : '\u2014'}
+          </Text>
+        </Pressable>
+        {editingKey === 'weight' && (
+          <View style={styles.inlineEdit}>
+            <TextInput
+              style={styles.inlineInput}
+              keyboardType="decimal-pad"
+              placeholder="kg"
+              placeholderTextColor="#444444"
+              value={editWeightKg}
+              onChangeText={setEditWeightKg}
+              maxLength={5}
+              autoFocus
+            />
+            <Pressable style={styles.saveBtn} onPress={() => saveAll()}>
+              <Text style={styles.saveBtnText}>{saving ? '...' : 'SAVE'}</Text>
+            </Pressable>
+          </View>
+        )}
+      </View>
 
       {/* Preferences — editable */}
       {prefs && (
@@ -256,6 +475,101 @@ export default function SettingsScreen() {
               </View>
             );
           })}
+        </View>
+      )}
+
+      {/* Current Lifts — editable */}
+      {prefs && (
+        <View style={styles.section}>
+          <Text style={styles.sectionHeader}>CURRENT LIFTS</Text>
+          <Text style={styles.editHint}>Approximate 1RM or recent heavy set</Text>
+
+          <View style={styles.unitToggle}>
+            <Pressable
+              onPress={() => setEditLiftUnit('kg')}
+              style={[styles.unitBtn, editLiftUnit === 'kg' && styles.unitBtnActive]}>
+              <Text style={[styles.unitText, editLiftUnit === 'kg' && styles.unitTextActive]}>KG</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setEditLiftUnit('lb')}
+              style={[styles.unitBtn, editLiftUnit === 'lb' && styles.unitBtnActive]}>
+              <Text style={[styles.unitText, editLiftUnit === 'lb' && styles.unitTextActive]}>LB</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.liftRow}>
+            <Text style={styles.label}>BENCH</Text>
+            <TextInput
+              style={styles.liftInput}
+              keyboardType="numeric"
+              placeholder="\u2014"
+              placeholderTextColor="#444444"
+              value={editBench}
+              onChangeText={setEditBench}
+            />
+          </View>
+          <View style={styles.liftRow}>
+            <Text style={styles.label}>SQUAT</Text>
+            <TextInput
+              style={styles.liftInput}
+              keyboardType="numeric"
+              placeholder="\u2014"
+              placeholderTextColor="#444444"
+              value={editSquat}
+              onChangeText={setEditSquat}
+            />
+          </View>
+          <View style={styles.liftRow}>
+            <Text style={styles.label}>DEADLIFT</Text>
+            <TextInput
+              style={styles.liftInput}
+              keyboardType="numeric"
+              placeholder="\u2014"
+              placeholderTextColor="#444444"
+              value={editDeadlift}
+              onChangeText={setEditDeadlift}
+            />
+          </View>
+
+          <Pressable
+            style={[styles.saveLiftBtn, saving && { opacity: 0.5 }]}
+            onPress={() => saveAll()}
+            disabled={saving}>
+            <Text style={styles.saveLiftBtnText}>{saving ? 'SAVING...' : 'SAVE LIFTS'}</Text>
+          </Pressable>
+        </View>
+      )}
+
+      {/* Training History — editable */}
+      {prefs && (
+        <View style={styles.section}>
+          <Pressable
+            onPress={() => setEditingKey(editingKey === 'history' ? null : 'history')}>
+            <Text style={styles.sectionHeader}>
+              TRAINING HISTORY {editingKey === 'history' ? '\u25B2' : '\u25BC'}
+            </Text>
+          </Pressable>
+          {editingKey === 'history' && (
+            <>
+              <TextInput
+                style={styles.textArea}
+                multiline
+                numberOfLines={4}
+                maxLength={500}
+                placeholder="e.g., push/pull/legs, bench 80kg, squat 100kg, run 5k twice a week"
+                placeholderTextColor="#444444"
+                value={editHistory}
+                onChangeText={setEditHistory}
+                textAlignVertical="top"
+              />
+              <Pressable
+                style={[styles.saveLiftBtn, saving && { opacity: 0.5 }]}
+                onPress={() => saveAll()}
+                disabled={saving}>
+                <Text style={styles.saveLiftBtnText}>{saving ? 'SAVING...' : 'SAVE'}</Text>
+              </Pressable>
+            </>
+          )}
         </View>
       )}
 
@@ -353,6 +667,7 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
     paddingVertical: 10,
   },
   label: {
@@ -368,6 +683,35 @@ const styles = StyleSheet.create({
   },
   editable: {
     color: '#2ECC71',
+  },
+  inlineEdit: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingBottom: 12,
+  },
+  inlineInput: {
+    borderWidth: 1,
+    borderColor: '#333333',
+    color: '#EAEAEA',
+    fontSize: 16,
+    fontFamily: MONO,
+    width: 80,
+    textAlign: 'center',
+    paddingVertical: 8,
+  },
+  saveBtn: {
+    borderWidth: 0.5,
+    borderColor: '#2ECC71',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  saveBtnText: {
+    color: '#2ECC71',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 2,
+    fontFamily: MONO,
   },
   optionsRow: {
     flexDirection: 'row',
@@ -395,6 +739,78 @@ const styles = StyleSheet.create({
   optionChipTextSelected: {
     color: '#2ECC71',
   },
+  // Lifts
+  unitToggle: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 12,
+    marginTop: 4,
+  },
+  unitBtn: {
+    borderWidth: 1,
+    borderColor: '#333333',
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+  },
+  unitBtnActive: {
+    borderColor: '#2ECC71',
+    backgroundColor: '#0D1A0D',
+  },
+  unitText: {
+    color: '#888888',
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 2,
+    fontFamily: MONO,
+  },
+  unitTextActive: {
+    color: '#2ECC71',
+  },
+  liftRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#1A1A1A',
+  },
+  liftInput: {
+    borderWidth: 1,
+    borderColor: '#333333',
+    color: '#EAEAEA',
+    fontSize: 14,
+    fontFamily: MONO,
+    width: 72,
+    textAlign: 'center',
+    paddingVertical: 6,
+  },
+  saveLiftBtn: {
+    marginTop: 12,
+    borderWidth: 0.5,
+    borderColor: '#2ECC71',
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  saveLiftBtnText: {
+    color: '#2ECC71',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 2,
+    fontFamily: MONO,
+  },
+  // Training history
+  textArea: {
+    borderWidth: 1,
+    borderColor: '#333333',
+    color: '#EAEAEA',
+    fontSize: 13,
+    lineHeight: 20,
+    padding: 12,
+    minHeight: 80,
+    fontFamily: MONO,
+    marginTop: 8,
+  },
+  // Integrations
   valueConnected: {
     color: '#2ECC71',
     fontSize: 12,
