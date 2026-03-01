@@ -28,6 +28,7 @@ export interface LogSetPayload {
 
 export interface CompleteWorkoutPayload {
   mobile_local_id: string;
+  override_reason?: string;
 }
 
 export interface OverrideSessionPayload {

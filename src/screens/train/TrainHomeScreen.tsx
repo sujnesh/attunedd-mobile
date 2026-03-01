@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import {
@@ -9,7 +9,7 @@ import {
 } from '../../workout/controller/useActiveWorkout';
 import { executeSql, generateUUID, nowISO } from '../../db/database';
 import { deriveCaps } from '../../state/evaluationEngine';
-import { getMeta } from '../../services/metaStateService';
+import { getMeta, setMeta } from '../../services/metaStateService';
 import {
   initializeSession,
   serialize,
@@ -23,6 +23,13 @@ import { apiCached } from '../../services/apiClient';
 const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
 const DAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
 
+const DEVIATION_REASONS = [
+  'Feeling different today',
+  'Want to train other muscles',
+  'Equipment unavailable',
+  'Just exploring',
+] as const;
+
 export default function TrainHomeScreen({ navigation }: TrainHomeProps) {
   const insets = useSafeAreaInsets();
   const [starting, setStarting] = useState(false);
@@ -30,6 +37,7 @@ export default function TrainHomeScreen({ navigation }: TrainHomeProps) {
   const [planName, setPlanName] = useState<string | null>(null);
   const [todaySession, setTodaySession] = useState<PlanDayData | null>(null);
   const [week, setWeek] = useState<PlanDayData[]>([]);
+  const [showDeviationPicker, setShowDeviationPicker] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -42,13 +50,11 @@ export default function TrainHomeScreen({ navigation }: TrainHomeProps) {
     if (starting) return;
     setStarting(true);
     try {
-      // Discard any existing draft before starting fresh
       if (draft) {
         await discardDraft(draft.draftId);
         setDraft(null);
       }
 
-      // Create draft
       const band = await getMeta('last_risk_band');
       const caps = deriveCaps(band ?? 'green');
       const allowedStress = await computeAllowedStress(caps);
@@ -66,7 +72,7 @@ export default function TrainHomeScreen({ navigation }: TrainHomeProps) {
       const screen = mode === 'planned' ? 'PlannedWorkout' : 'FreeFormWorkout';
       navigation.navigate(screen, { draftId });
     } catch {
-      // start failure is non-fatal
+      // non-fatal
     } finally {
       setStarting(false);
     }
@@ -84,36 +90,53 @@ export default function TrainHomeScreen({ navigation }: TrainHomeProps) {
     setDraft(null);
   };
 
-  return (
-    <ScrollView style={[styles.root, { paddingTop: insets.top + 48 }]} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>TRAIN</Text>
+  const mainExercises = todaySession
+    ? todaySession.blocks
+        .filter((b) => b.name === 'Main')
+        .flatMap((b) => b.exercises)
+    : [];
 
+  return (
+    <ScrollView
+      style={[styles.root, { paddingTop: insets.top + 48 }]}
+      contentContainerStyle={styles.content}>
+
+      {/* Today's prescription — dominant element */}
       {todaySession && !todaySession.rest_day && (
         <Pressable
-          style={({ pressed }) => [styles.planBlock, pressed && styles.pressed]}
+          style={({ pressed }) => [styles.prescriptionBlock, pressed && styles.pressed]}
           onPress={() => navigation.navigate('PlanDetail')}>
-          <Text style={styles.planLabel}>TODAY&apos;S SESSION</Text>
-          <Text style={styles.planName}>
+          <Text style={styles.prescriptionLabel}>TODAY'S PRESCRIPTION</Text>
+          <Text style={styles.prescriptionType}>
             {formatSessionType(todaySession.session_type)}
           </Text>
-          {planName && <Text style={styles.planSubtext}>{planName}</Text>}
           {todaySession.rationale && (
-            <Text style={styles.planRationale}>{todaySession.rationale}</Text>
+            <Text style={styles.prescriptionRationale}>{todaySession.rationale}</Text>
           )}
+          {mainExercises.slice(0, 4).map((ex, i) => (
+            <Text key={i} style={styles.prescriptionExercise}>
+              {ex.name}
+              {ex.sets && ex.rep_range ? `  ${ex.sets}\u00D7${ex.rep_range}` : ''}
+            </Text>
+          ))}
+          {mainExercises.length > 4 && (
+            <Text style={styles.prescriptionMore}>+{mainExercises.length - 4} more</Text>
+          )}
+
           {todaySession.workout_status === 'completed' && (
-            <Text style={styles.planCompleted}>COMPLETED</Text>
+            <Text style={styles.completedTag}>Completed</Text>
           )}
-          {todaySession.blocks
-            .filter((b) => b.name === 'Main')
-            .flatMap((b) => b.exercises)
-            .map((ex, i) => (
-              <Text key={i} style={styles.planExercise}>
-                {ex.name}
-                {ex.sets && ex.rep_range ? `  ${ex.sets}\u00D7${ex.rep_range}` : ''}
-                {ex.duration_minutes ? `  ${ex.duration_minutes} min` : ''}
+
+          {todaySession.workout_status !== 'completed' && (
+            <Pressable
+              onPress={() => handleStart('planned')}
+              style={({ pressed }) => [styles.startBtn, pressed && styles.startBtnPressed]}
+              disabled={starting}>
+              <Text style={styles.startBtnText}>
+                {starting ? 'Starting...' : 'Start Session'}
               </Text>
-            ))}
-          <Text style={styles.viewDetailHint}>TAP FOR FULL PLAN DETAILS</Text>
+            </Pressable>
+          )}
         </Pressable>
       )}
 
@@ -121,66 +144,113 @@ export default function TrainHomeScreen({ navigation }: TrainHomeProps) {
         <Pressable
           style={({ pressed }) => [styles.restBlock, pressed && styles.pressed]}
           onPress={() => navigation.navigate('PlanDetail')}>
-          <Text style={styles.restLabel}>REST DAY</Text>
+          <Text style={styles.prescriptionLabel}>TODAY'S PRESCRIPTION</Text>
+          <Text style={styles.restType}>Rest Day</Text>
           {todaySession.rationale ? (
-            <Text style={styles.restHint}>{todaySession.rationale}</Text>
+            <Text style={styles.restRationale}>{todaySession.rationale}</Text>
           ) : (
-            <Text style={styles.restHint}>Recovery is part of the program</Text>
+            <Text style={styles.restRationale}>Recovery priority scheduled.</Text>
           )}
-          <Text style={styles.viewDetailHint}>TAP FOR FULL PLAN DETAILS</Text>
         </Pressable>
       )}
 
-      {week.length > 0 && (
-        <WeekSchedule week={week} onViewPlan={() => navigation.navigate('PlanDetail')} />
+      {!todaySession && (
+        <View style={styles.noPlanBlock}>
+          <Text style={styles.noPlanTitle}>No plan generated yet</Text>
+          <Text style={styles.noPlanText}>
+            Complete onboarding to receive your training prescription.
+          </Text>
+        </View>
       )}
 
+      {/* In-progress draft */}
       {draft && (
         <View style={styles.draftBlock}>
-          <Text style={styles.draftTitle}>IN-PROGRESS SESSION</Text>
+          <Text style={styles.draftLabel}>IN PROGRESS</Text>
           <Text style={styles.draftInfo}>
-            {draft.mode === 'planned' ? 'PLANNED' : 'FREE FORM'} — {draft.setCount} sets logged
+            {draft.mode === 'planned' ? 'Planned' : 'Free form'} {'\u2014'} {draft.setCount} sets
           </Text>
           <View style={styles.draftActions}>
             <Pressable
               style={({ pressed }) => [styles.resumeBtn, pressed && styles.pressed]}
               onPress={handleResume}>
-              <Text style={styles.resumeText}>RESUME</Text>
+              <Text style={styles.resumeText}>Resume</Text>
             </Pressable>
             <Pressable
               style={({ pressed }) => [styles.discardBtn, pressed && styles.pressed]}
               onPress={handleDiscard}>
-              <Text style={styles.discardText}>DISCARD</Text>
+              <Text style={styles.discardText}>Discard</Text>
             </Pressable>
           </View>
         </View>
       )}
 
-      <View style={styles.buttonGroup}>
-        <Pressable
-          style={({ pressed }) => [styles.button, pressed && styles.pressed]}
-          onPress={() => handleStart('planned')}
-          disabled={starting}>
-          <Text style={styles.buttonLabel}>START PLANNED WORKOUT</Text>
-          <Text style={styles.buttonHint}>Coached session with fatigue tracking</Text>
-        </Pressable>
+      {/* Secondary: Free form option */}
+      <Pressable
+        style={({ pressed }) => [styles.secondaryBtn, pressed && styles.pressed]}
+        onPress={() => {
+          // Show deviation picker if a planned (non-rest, non-completed) session exists
+          const hasPlannedSession = todaySession &&
+            !todaySession.rest_day &&
+            todaySession.workout_status !== 'completed';
+          if (hasPlannedSession) {
+            setShowDeviationPicker(true);
+          } else {
+            handleStart('free_form');
+          }
+        }}
+        disabled={starting}>
+        <Text style={styles.secondaryLabel}>Free Form Session</Text>
+        <Text style={styles.secondaryHint}>Open session, log any exercise</Text>
+      </Pressable>
 
-        <Pressable
-          style={({ pressed }) => [styles.button, pressed && styles.pressed]}
-          onPress={() => handleStart('free_form')}
-          disabled={starting}>
-          <Text style={styles.buttonLabel}>FREE FORM SESSION</Text>
-          <Text style={styles.buttonHint}>Open session with auto-detection</Text>
-        </Pressable>
-      </View>
+      {/* Deviation reason picker */}
+      <Modal
+        visible={showDeviationPicker}
+        transparent
+        animationType="fade"
+        statusBarTranslucent>
+        <View style={styles.deviationOverlay}>
+          <View style={styles.deviationCard}>
+            <Text style={styles.deviationTitle}>WHY FREE FORM?</Text>
+            <Text style={styles.deviationSubtitle}>
+              You have a planned session today. Why are you deviating?
+            </Text>
+            {DEVIATION_REASONS.map((reason) => (
+              <Pressable
+                key={reason}
+                style={({ pressed }) => [
+                  styles.deviationOption,
+                  pressed && styles.deviationOptionPressed,
+                ]}
+                onPress={async () => {
+                  await setMeta('last_freeform_reason', reason);
+                  setShowDeviationPicker(false);
+                  handleStart('free_form');
+                }}>
+                <Text style={styles.deviationOptionText}>{reason}</Text>
+              </Pressable>
+            ))}
+            <Pressable
+              onPress={() => setShowDeviationPicker(false)}
+              style={styles.deviationCancel}>
+              <Text style={styles.deviationCancelText}>Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
 
+      {/* Week schedule */}
+      {week.length > 0 && (
+        <WeekSchedule week={week} onViewPlan={() => navigation.navigate('PlanDetail')} />
+      )}
+
+      {/* History link */}
       <Pressable
         style={styles.historyLink}
         onPress={() => navigation.navigate('WorkoutHistory')}>
-        <Text style={styles.historyText}>VIEW HISTORY</Text>
+        <Text style={styles.historyText}>View History</Text>
       </Pressable>
-
-      {starting && <Text style={styles.status}>STARTING...</Text>}
     </ScrollView>
   );
 }
@@ -190,7 +260,7 @@ function WeekSchedule({ week, onViewPlan }: { week: PlanDayData[]; onViewPlan: (
     <Pressable
       style={({ pressed }) => [styles.weekBlock, pressed && styles.pressed]}
       onPress={onViewPlan}>
-      <Text style={styles.weekHeader}>THIS WEEK</Text>
+      <Text style={styles.weekLabel}>THIS WEEK</Text>
       {week.map((day) => {
         const d = new Date(day.date + 'T00:00:00');
         const dayLabel = DAYS[d.getDay()];
@@ -216,15 +286,14 @@ function WeekSchedule({ week, onViewPlan }: { week: PlanDayData[]; onViewPlan: (
                 isFuture && styles.weekDimmed,
               ]}
               numberOfLines={1}>
-              {day.rest_day ? 'REST' : formatSessionType(day.session_type)}
+              {day.rest_day ? 'Rest' : formatSessionType(day.session_type)}
             </Text>
-            <Text style={styles.weekStatus}>
-              {isCompleted ? '✓' : ''}
-            </Text>
+            {isCompleted && (
+              <Text style={styles.weekCompleted}>{'\u2713'}</Text>
+            )}
           </View>
         );
       })}
-      <Text style={styles.viewDetailHint}>TAP FOR FULL PLAN</Text>
     </Pressable>
   );
 }
@@ -246,7 +315,7 @@ async function fetchTodayPlan(
 }
 
 function formatSessionType(type: string): string {
-  return type.replace(/_/g, ' ').toUpperCase();
+  return type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 async function computeAllowedStress(caps: PolicyCaps): Promise<number> {
@@ -268,126 +337,209 @@ const styles = StyleSheet.create({
     backgroundColor: '#0A0A0A',
   },
   content: {
-    paddingHorizontal: 32,
-    paddingBottom: 32,
+    paddingHorizontal: 28,
+    paddingBottom: 40,
   },
-  title: {
-    color: '#EAEAEA',
-    fontSize: 13,
-    fontWeight: '600',
-    letterSpacing: 4,
+  // Prescription block — dominant
+  prescriptionBlock: {
+    paddingVertical: 24,
+    paddingHorizontal: 4,
     marginBottom: 32,
-    textAlign: 'center',
   },
-  planBlock: {
-    borderWidth: 0.5,
-    borderColor: '#2ECC71',
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    marginBottom: 24,
-  },
-  planLabel: {
-    color: '#2ECC71',
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 2,
-    marginBottom: 6,
-  },
-  planName: {
-    color: '#EAEAEA',
-    fontSize: 14,
-    fontWeight: '600',
-    letterSpacing: 2,
-    fontFamily: MONO,
-    marginBottom: 4,
-  },
-  planSubtext: {
+  prescriptionLabel: {
     color: '#555555',
     fontSize: 11,
-    fontFamily: MONO,
+    fontWeight: '700',
+    letterSpacing: 3,
     marginBottom: 12,
   },
-  planRationale: {
-    color: '#888888',
-    fontSize: 11,
-    lineHeight: 16,
+  prescriptionType: {
+    color: '#EAEAEA',
+    fontSize: 22,
+    fontWeight: '600',
+    letterSpacing: 1,
     marginBottom: 10,
-    fontStyle: 'italic',
   },
-  planCompleted: {
-    color: '#2ECC71',
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 2,
+  prescriptionRationale: {
+    color: '#888888',
+    fontSize: 13,
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  prescriptionExercise: {
+    color: '#999999',
+    fontSize: 13,
     fontFamily: MONO,
+    paddingVertical: 3,
+  },
+  prescriptionMore: {
+    color: '#555555',
+    fontSize: 12,
+    fontFamily: MONO,
+    marginTop: 4,
     marginBottom: 8,
   },
-  planExercise: {
-    color: '#888888',
-    fontSize: 11,
-    fontFamily: MONO,
-    paddingVertical: 2,
-  },
-  restBlock: {
-    borderWidth: 0.5,
-    borderColor: '#333333',
-    paddingVertical: 20,
-    paddingHorizontal: 20,
-    marginBottom: 24,
-    alignItems: 'center',
-  },
-  restLabel: {
-    color: '#555555',
+  completedTag: {
+    color: '#2ECC71',
     fontSize: 13,
     fontWeight: '600',
-    letterSpacing: 3,
-    fontFamily: MONO,
-    marginBottom: 6,
+    letterSpacing: 1,
+    marginTop: 12,
   },
-  restHint: {
-    color: '#333333',
-    fontSize: 11,
-  },
-  weekBlock: {
-    borderWidth: 0.5,
-    borderColor: '#222222',
+  // Primary CTA
+  startBtn: {
+    marginTop: 20,
     paddingVertical: 14,
-    paddingHorizontal: 16,
-    marginBottom: 24,
+    alignItems: 'center',
+    backgroundColor: '#2ECC71',
   },
-  weekHeader: {
+  startBtnPressed: {
+    backgroundColor: '#27AE60',
+  },
+  startBtnText: {
+    color: '#0A0A0A',
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 1,
+  },
+  // Rest day
+  restBlock: {
+    paddingVertical: 24,
+    paddingHorizontal: 4,
+    marginBottom: 32,
+  },
+  restType: {
+    color: '#888888',
+    fontSize: 22,
+    fontWeight: '600',
+    letterSpacing: 1,
+    marginBottom: 10,
+  },
+  restRationale: {
+    color: '#666666',
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  // No plan
+  noPlanBlock: {
+    paddingVertical: 32,
+    marginBottom: 32,
+  },
+  noPlanTitle: {
+    color: '#888888',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  noPlanText: {
     color: '#555555',
-    fontSize: 10,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  pressed: {
+    backgroundColor: '#111111',
+  },
+  // Draft
+  draftBlock: {
+    paddingVertical: 16,
+    paddingHorizontal: 4,
+    marginBottom: 32,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#F1C40F',
+  },
+  draftLabel: {
+    color: '#F1C40F',
+    fontSize: 11,
     fontWeight: '700',
     letterSpacing: 3,
-    marginBottom: 10,
+    marginBottom: 8,
+  },
+  draftInfo: {
+    color: '#888888',
+    fontSize: 13,
+    marginBottom: 16,
+  },
+  draftActions: {
+    flexDirection: 'row',
+    gap: 20,
+  },
+  resumeBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    backgroundColor: '#F1C40F',
+  },
+  resumeText: {
+    color: '#0A0A0A',
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 1,
+  },
+  discardBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+  },
+  discardText: {
+    color: '#555555',
+    fontSize: 13,
+    letterSpacing: 1,
+  },
+  // Secondary button
+  secondaryBtn: {
+    paddingVertical: 18,
+    paddingHorizontal: 4,
+    marginBottom: 32,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#1A1A1A',
+  },
+  secondaryLabel: {
+    color: '#CCCCCC',
+    fontSize: 15,
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  secondaryHint: {
+    color: '#555555',
+    fontSize: 12,
+  },
+  // Week
+  weekBlock: {
+    paddingVertical: 16,
+    marginBottom: 24,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#1A1A1A',
+  },
+  weekLabel: {
+    color: '#555555',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 3,
+    marginBottom: 14,
   },
   weekRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 6,
+    paddingVertical: 8,
   },
   weekRowToday: {
-    backgroundColor: '#151515',
+    backgroundColor: '#111111',
     marginHorizontal: -8,
     paddingHorizontal: 8,
     borderRadius: 2,
   },
   weekDay: {
     color: '#888888',
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
     letterSpacing: 2,
     fontFamily: MONO,
-    width: 40,
+    width: 44,
   },
   weekDayToday: {
     color: '#2ECC71',
   },
   weekSession: {
     color: '#CCCCCC',
-    fontSize: 11,
-    fontFamily: MONO,
+    fontSize: 13,
     flex: 1,
   },
   weekRest: {
@@ -396,110 +548,74 @@ const styles = StyleSheet.create({
   weekDimmed: {
     color: '#444444',
   },
-  weekStatus: {
+  weekCompleted: {
     color: '#2ECC71',
-    fontSize: 12,
+    fontSize: 13,
     width: 20,
     textAlign: 'right',
   },
-  draftBlock: {
-    borderWidth: 0.5,
-    borderColor: '#F1C40F',
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    marginBottom: 32,
-  },
-  draftTitle: {
-    color: '#F1C40F',
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 2,
-    marginBottom: 6,
-  },
-  draftInfo: {
-    color: '#888888',
-    fontSize: 12,
-    fontFamily: MONO,
-    marginBottom: 16,
-  },
-  draftActions: {
-    flexDirection: 'row',
-    gap: 16,
-  },
-  resumeBtn: {
-    borderWidth: 0.5,
-    borderColor: '#F1C40F',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-  },
-  resumeText: {
-    color: '#F1C40F',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 2,
-    fontFamily: MONO,
-  },
-  discardBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-  },
-  discardText: {
-    color: '#555555',
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 2,
-    fontFamily: MONO,
-  },
-  buttonGroup: {
-    gap: 16,
-  },
-  button: {
-    borderWidth: 0.5,
-    borderColor: '#333333',
-    paddingVertical: 20,
-    paddingHorizontal: 20,
-  },
-  pressed: {
-    backgroundColor: '#151515',
-  },
-  buttonLabel: {
-    color: '#EAEAEA',
-    fontSize: 13,
-    fontWeight: '600',
-    letterSpacing: 2,
-    fontFamily: MONO,
-  },
-  buttonHint: {
-    color: '#555555',
-    fontSize: 11,
-    marginTop: 6,
-  },
+  // History
   historyLink: {
-    marginTop: 24,
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: 16,
   },
   historyText: {
     color: '#555555',
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 2,
+    fontSize: 12,
+    letterSpacing: 1,
   },
-  viewDetailHint: {
-    color: '#444444',
-    fontSize: 10,
-    fontWeight: '600',
-    letterSpacing: 2,
-    fontFamily: MONO,
-    textAlign: 'center',
-    marginTop: 12,
+  // Deviation picker
+  deviationOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
   },
-  status: {
+  deviationCard: {
+    backgroundColor: '#111111',
+    width: '100%',
+    paddingVertical: 28,
+    paddingHorizontal: 24,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#222222',
+  },
+  deviationTitle: {
     color: '#555555',
     fontSize: 11,
-    fontFamily: MONO,
-    letterSpacing: 2,
+    fontWeight: '700',
+    letterSpacing: 3,
+    marginBottom: 8,
     textAlign: 'center',
-    marginTop: 32,
+  },
+  deviationSubtitle: {
+    color: '#888888',
+    fontSize: 13,
+    lineHeight: 20,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  deviationOption: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#1A1A1A',
+  },
+  deviationOptionPressed: {
+    backgroundColor: '#1A1A1A',
+  },
+  deviationOptionText: {
+    color: '#CCCCCC',
+    fontSize: 14,
+  },
+  deviationCancel: {
+    paddingVertical: 12,
+    marginTop: 16,
+    alignItems: 'center',
+  },
+  deviationCancelText: {
+    color: '#555555',
+    fontSize: 12,
+    letterSpacing: 1,
   },
 });

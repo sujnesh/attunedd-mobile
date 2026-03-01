@@ -371,8 +371,11 @@ export function useActiveWorkout(): UseActiveWorkoutReturn {
         });
       }
 
+      // Include freeform deviation reason if set
+      const freeformReason = await getMeta('last_freeform_reason');
       const completePayload: CompleteWorkoutPayload = {
         mobile_local_id: mobileLocalId,
+        ...(freeformReason ? { override_reason: freeformReason } : {}),
       };
       await enqueueEvent({
         id: generateUUID(),
@@ -382,6 +385,10 @@ export function useActiveWorkout(): UseActiveWorkoutReturn {
         device_id: deviceId,
         app_version: appVersion,
       });
+      // Clear after use
+      if (freeformReason) {
+        await setMeta('last_freeform_reason', '');
+      }
 
       // Blocking sync flush — server authoritative debrief
       const authToken = await getMeta('auth_token');
