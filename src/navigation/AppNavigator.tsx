@@ -13,6 +13,8 @@ import LoginScreen from '../screens/LoginScreen';
 import RegisterScreen from '../screens/RegisterScreen';
 import ForgotPasswordScreen from '../screens/ForgotPasswordScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
+import WelcomeScreen from '../screens/WelcomeScreen';
+import EducationProvider from '../components/EducationProvider';
 import { getMeta, setMeta } from '../services/metaStateService';
 import { onAuthChange, emitAuthChange } from '../services/authEvents';
 import { api } from '../services/apiClient';
@@ -76,13 +78,16 @@ function MainTabs() {
 export default function AppNavigator() {
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [hasPreferences, setHasPreferences] = useState(false);
+  const [hasSeenWelcome, setHasSeenWelcome] = useState(false);
   const [checking, setChecking] = useState(true);
 
   const loadState = useCallback(async () => {
     const token = await getMeta('auth_token');
     const prefs = await getMeta('has_preferences');
+    const welcome = await getMeta('has_seen_welcome');
     setAuthToken(token);
     setHasPreferences(prefs === 'true');
+    setHasSeenWelcome(welcome === 'true');
     setChecking(false);
   }, []);
 
@@ -95,20 +100,29 @@ export default function AppNavigator() {
     return unsubscribe;
   }, [loadState]);
 
+  const handleWelcomeComplete = useCallback(async () => {
+    await setMeta('has_seen_welcome', 'true');
+    setHasSeenWelcome(true);
+  }, []);
+
   if (checking) {
     return null;
   }
 
   return (
-    <NavigationContainer>
-      {!authToken ? (
-        <AuthNavigator />
-      ) : !hasPreferences ? (
-        <OnboardingScreen />
-      ) : (
-        <MainTabs />
-      )}
-    </NavigationContainer>
+    <EducationProvider>
+      <NavigationContainer>
+        {!authToken ? (
+          <AuthNavigator />
+        ) : !hasSeenWelcome ? (
+          <WelcomeScreen onComplete={handleWelcomeComplete} />
+        ) : !hasPreferences ? (
+          <OnboardingScreen />
+        ) : (
+          <MainTabs />
+        )}
+      </NavigationContainer>
+    </EducationProvider>
   );
 }
 
