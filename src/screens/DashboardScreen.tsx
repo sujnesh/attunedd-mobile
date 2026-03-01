@@ -1,7 +1,8 @@
 import React, { useCallback, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import {
   loadLatestEvaluation,
   triggerManualEvaluation,
@@ -16,7 +17,17 @@ import {
 } from '../services/explanationEngine';
 import { apiCached } from '../services/apiClient';
 import { deriveCaps } from '../state/evaluationEngine';
-import type { CoachingTodayResponse, ProjectionDay, HeavySessionSimulation, ProjectionsResponse } from '../types/api';
+import InfoChip from '../components/InfoChip';
+import type { RootTabParamList } from '../navigation/types';
+import type {
+  CoachingTodayResponse,
+  ProjectionDay,
+  HeavySessionSimulation,
+  ProjectionsResponse,
+  CurrentPlanResponse,
+  PlanDayData,
+  PlanExercise,
+} from '../types/api';
 
 const BAND_COLORS: Record<string, string> = {
   green: '#2ECC71',
@@ -81,17 +92,20 @@ function mapServerToReadinessState(server: CoachingTodayResponse): ReadinessStat
 
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation<BottomTabNavigationProp<RootTabParamList>>();
   const [state, setState] = useState<ReadinessState | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [projections, setProjections] = useState<ProjectionDay[]>([]);
   const [heavySim, setHeavySim] = useState<HeavySessionSimulation | null>(null);
   const [isWelcome, setIsWelcome] = useState(false);
+  const [todayPlan, setTodayPlan] = useState<PlanDayData | null>(null);
 
   useFocusEffect(
     useCallback(() => {
       loadDashboard();
       fetchProjections();
+      fetchTodayPlan();
     }, [])
   );
 
@@ -124,6 +138,16 @@ export default function DashboardScreen() {
       setHeavySim(body.heavy_session_simulation);
     } catch {
       // projection fetch failure is non-fatal
+    }
+  }, []);
+
+  const fetchTodayPlan = useCallback(async () => {
+    try {
+      const body = await apiCached<CurrentPlanResponse>('/api/plans/current', 'cache_plans_current');
+      const today = body.week?.find((d) => d.today);
+      setTodayPlan(today ?? null);
+    } catch {
+      // plan fetch failure is non-fatal
     }
   }, []);
 
@@ -187,13 +211,24 @@ export default function DashboardScreen() {
       contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 32 }]}
     >
       <Text style={[styles.score, { color: accent }]}>{data.score}</Text>
-      <Text style={[styles.bandLabel, { color: accent }]}>{bandLabel}</Text>
+      <View style={styles.bandRow}>
+        <InfoChip topic="adaptation_score" color={accent}>
+          <Text style={[styles.bandLabel, { color: accent }]}>{bandLabel}</Text>
+        </InfoChip>
+      </View>
       <Text style={styles.decisionLine}>{headline}</Text>
 
       {isWelcome && (
         <Text style={styles.welcomeHint}>
           Complete your first workout to see detailed coaching insights
         </Text>
+      )}
+
+      {todayPlan && (
+        <TodayPlanCard
+          day={todayPlan}
+          onStartWorkout={() => navigation.navigate('Train', { screen: 'TrainHome' })}
+        />
       )}
 
       {coaching?.nudges && coaching.nudges.length > 0 ? (
@@ -289,6 +324,67 @@ function SessionLimitsSection({ limits }: { limits: LimitRow[] }) {
           </Text>
         </View>
       ))}
+    </View>
+  );
+}
+
+function TodayPlanCard({
+  day,
+  onStartWorkout,
+}: {
+  day: PlanDayData;
+  onStartWorkout: () => void;
+}) {
+  const sessionLabel = day.session_type.replace(/_/g, ' ').toUpperCase();
+  const mainBlock = day.blocks.find((b) => b.name === 'Main');
+  const mainExercises = mainBlock?.exercises?.filter((e) => e.sets) ?? [];
+
+  if (day.rest_day) {
+    return (
+      <View style={styles.todayCard}>
+        <Text style={styles.todayHeader}>TODAY&apos;S PLAN</Text>
+        <Text style={styles.todaySessionType}>REST DAY</Text>
+        {day.rationale ? (
+          <Text style={styles.todayRationale}>{day.rationale}</Text>
+        ) : null}
+      </View>
+    );
+  }
+
+  if (day.workout_status === 'completed') {
+    return (
+      <View style={styles.todayCard}>
+        <Text style={styles.todayHeader}>TODAY&apos;S PLAN</Text>
+        <Text style={styles.todaySessionType}>{sessionLabel}</Text>
+        <Text style={styles.todayCompleted}>COMPLETED</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.todayCard}>
+      <Text style={styles.todayHeader}>TODAY&apos;S PLAN</Text>
+      <Text style={styles.todaySessionType}>{sessionLabel}</Text>
+      {day.rationale ? (
+        <Text style={styles.todayRationale}>{day.rationale}</Text>
+      ) : null}
+      {mainExercises.slice(0, 4).map((ex, i) => (
+        <Text key={i} style={styles.todayExercise}>
+          {ex.name}
+          {ex.sets && ex.rep_range ? `  ${ex.sets}\u00D7${ex.rep_range}` : ''}
+        </Text>
+      ))}
+      {mainExercises.length > 4 && (
+        <Text style={styles.todayMore}>+{mainExercises.length - 4} more</Text>
+      )}
+      <Pressable
+        onPress={onStartWorkout}
+        style={({ pressed }) => [
+          styles.startBtn,
+          pressed && styles.startBtnPressed,
+        ]}>
+        <Text style={styles.startBtnText}>START WORKOUT</Text>
+      </Pressable>
     </View>
   );
 }
@@ -624,5 +720,73 @@ const styles = StyleSheet.create({
     color: '#F1C40F',
     fontSize: 11,
     marginTop: 6,
+  },
+  bandRow: {
+    marginBottom: 12,
+  },
+  todayCard: {
+    width: '100%',
+    borderWidth: 0.5,
+    borderColor: '#222222',
+    padding: 16,
+    marginBottom: 24,
+  },
+  todayHeader: {
+    color: '#555555',
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 3,
+    marginBottom: 8,
+    fontFamily: MONO,
+  },
+  todaySessionType: {
+    color: '#EAEAEA',
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: 2,
+    marginBottom: 8,
+  },
+  todayRationale: {
+    color: '#888888',
+    fontSize: 13,
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  todayExercise: {
+    color: '#CCCCCC',
+    fontSize: 12,
+    fontFamily: MONO,
+    paddingVertical: 4,
+  },
+  todayMore: {
+    color: '#555555',
+    fontSize: 11,
+    fontFamily: MONO,
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  todayCompleted: {
+    color: '#2ECC71',
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 2,
+    fontFamily: MONO,
+  },
+  startBtn: {
+    marginTop: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#2ECC71',
+  },
+  startBtnPressed: {
+    backgroundColor: '#0D1A0D',
+  },
+  startBtnText: {
+    color: '#2ECC71',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 2,
+    fontFamily: MONO,
   },
 });
