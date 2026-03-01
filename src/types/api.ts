@@ -168,6 +168,26 @@ export interface WorkoutHistoryResponse {
   has_more: boolean;
 }
 
+export interface WhoopCycleData {
+  date: string;
+  recovery_score: number | null;
+  hrv_rmssd: number | null;
+  resting_hr: number | null;
+  strain: number | null;
+}
+
+export interface WhoopSleepData {
+  date: string;
+  performance_percentage: number | null;
+  efficiency: number | null;
+  total_sleep_hours: number | null;
+}
+
+export interface WhoopRecentResponse {
+  cycles: WhoopCycleData[];
+  sleep: WhoopSleepData[];
+}
+
 export interface SyncResponse {
   status: 'accepted' | 'rejected' | 'stale_client' | 'error';
   authoritative_state: AuthoritativeState;
