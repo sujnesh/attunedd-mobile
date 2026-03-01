@@ -21,6 +21,7 @@ import type { PlanDayData, CurrentPlanResponse } from '../../types/api';
 import { apiCached } from '../../services/apiClient';
 
 const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
+const DAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
 
 export default function TrainHomeScreen({ navigation }: TrainHomeProps) {
   const insets = useSafeAreaInsets();
@@ -28,11 +29,12 @@ export default function TrainHomeScreen({ navigation }: TrainHomeProps) {
   const [draft, setDraft] = useState<DraftInfo | null>(null);
   const [planName, setPlanName] = useState<string | null>(null);
   const [todaySession, setTodaySession] = useState<PlanDayData | null>(null);
+  const [week, setWeek] = useState<PlanDayData[]>([]);
 
   useFocusEffect(
     useCallback(() => {
       getActiveDraft().then(setDraft).catch(() => setDraft(null));
-      fetchTodayPlan(setPlanName, setTodaySession);
+      fetchTodayPlan(setPlanName, setTodaySession, setWeek);
     }, [])
   );
 
@@ -116,6 +118,8 @@ export default function TrainHomeScreen({ navigation }: TrainHomeProps) {
         </View>
       )}
 
+      {week.length > 0 && <WeekSchedule week={week} />}
+
       {draft && (
         <View style={styles.draftBlock}>
           <Text style={styles.draftTitle}>IN-PROGRESS SESSION</Text>
@@ -166,15 +170,58 @@ export default function TrainHomeScreen({ navigation }: TrainHomeProps) {
   );
 }
 
+function WeekSchedule({ week }: { week: PlanDayData[] }) {
+  return (
+    <View style={styles.weekBlock}>
+      <Text style={styles.weekHeader}>THIS WEEK</Text>
+      {week.map((day) => {
+        const d = new Date(day.date + 'T00:00:00');
+        const dayLabel = DAYS[d.getDay()];
+        const isCompleted = day.workout_status === 'completed';
+        const isFuture = !day.today && new Date(day.date) > new Date();
+
+        return (
+          <View
+            key={day.date}
+            style={[styles.weekRow, day.today && styles.weekRowToday]}>
+            <Text
+              style={[
+                styles.weekDay,
+                day.today && styles.weekDayToday,
+                isFuture && styles.weekDimmed,
+              ]}>
+              {dayLabel}
+            </Text>
+            <Text
+              style={[
+                styles.weekSession,
+                day.rest_day && styles.weekRest,
+                isFuture && styles.weekDimmed,
+              ]}
+              numberOfLines={1}>
+              {day.rest_day ? 'REST' : formatSessionType(day.session_type)}
+            </Text>
+            <Text style={styles.weekStatus}>
+              {isCompleted ? '✓' : ''}
+            </Text>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
 async function fetchTodayPlan(
   setPlanName: (n: string | null) => void,
   setTodaySession: (s: PlanDayData | null) => void,
+  setWeek: (w: PlanDayData[]) => void,
 ) {
   try {
     const body = await apiCached<CurrentPlanResponse>('/api/plans/current', 'cache_plans_current');
     setPlanName(body.plan?.name ?? null);
     const today = body.week?.find((d) => d.today) ?? null;
     setTodaySession(today);
+    setWeek(body.week ?? []);
   } catch {
     // Non-fatal
   }
@@ -275,6 +322,60 @@ const styles = StyleSheet.create({
   restHint: {
     color: '#333333',
     fontSize: 11,
+  },
+  weekBlock: {
+    borderWidth: 0.5,
+    borderColor: '#222222',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    marginBottom: 24,
+  },
+  weekHeader: {
+    color: '#555555',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 3,
+    marginBottom: 10,
+  },
+  weekRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  weekRowToday: {
+    backgroundColor: '#151515',
+    marginHorizontal: -8,
+    paddingHorizontal: 8,
+    borderRadius: 2,
+  },
+  weekDay: {
+    color: '#888888',
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 2,
+    fontFamily: MONO,
+    width: 40,
+  },
+  weekDayToday: {
+    color: '#2ECC71',
+  },
+  weekSession: {
+    color: '#CCCCCC',
+    fontSize: 11,
+    fontFamily: MONO,
+    flex: 1,
+  },
+  weekRest: {
+    color: '#555555',
+  },
+  weekDimmed: {
+    color: '#444444',
+  },
+  weekStatus: {
+    color: '#2ECC71',
+    fontSize: 12,
+    width: 20,
+    textAlign: 'right',
   },
   draftBlock: {
     borderWidth: 0.5,
