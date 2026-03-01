@@ -49,12 +49,22 @@ jest.mock('react-native-screens', () => ({
   enableScreens: jest.fn(),
 }));
 
-jest.mock('@react-navigation/native', () => ({
-  NavigationContainer: ({ children }) => children,
-  useFocusEffect: jest.fn(),
-  useNavigation: () => ({ navigate: jest.fn(), goBack: jest.fn() }),
-  useRoute: () => ({ params: {} }),
+jest.mock('react-native-safe-area-context', () => ({
+  SafeAreaProvider: ({ children }) => children,
+  SafeAreaView: ({ children }) => children,
+  useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
+  useSafeAreaFrame: () => ({ x: 0, y: 0, width: 390, height: 844 }),
 }));
+
+jest.mock('@react-navigation/native', () => {
+  const React = require('react');
+  return {
+    NavigationContainer: ({ children }) => children,
+    useFocusEffect: (cb) => React.useEffect(() => { cb(); }, [cb]),
+    useNavigation: () => ({ navigate: jest.fn(), goBack: jest.fn() }),
+    useRoute: () => ({ params: {} }),
+  };
+});
 
 jest.mock('@react-navigation/bottom-tabs', () => ({
   createBottomTabNavigator: () => ({

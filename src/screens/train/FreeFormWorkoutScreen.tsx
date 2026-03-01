@@ -235,6 +235,7 @@ export default function FreeFormWorkoutScreen({ route, navigation }: FreeFormWor
 
       {nudge && (
         <View style={styles.nudgeBar}>
+          <Text style={styles.nudgeLabel}>COACH</Text>
           <Text style={styles.nudgeText}>{nudge}</Text>
         </View>
       )}
@@ -462,12 +463,22 @@ const styles = StyleSheet.create({
     borderBottomColor: '#333366',
     paddingHorizontal: 24,
     paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  nudgeLabel: {
+    color: '#6666AA',
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 2,
+    fontFamily: MONO,
   },
   nudgeText: {
     color: '#8888CC',
     fontSize: 11,
     fontFamily: MONO,
-    textAlign: 'center',
+    flex: 1,
   },
   setList: {
     flex: 1,

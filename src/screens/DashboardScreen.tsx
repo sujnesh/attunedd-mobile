@@ -164,7 +164,7 @@ export default function DashboardScreen() {
   const fetchRecentWorkouts = useCallback(async () => {
     try {
       const [result] = await executeSql(
-        `SELECT mode, actual_stress, completed_at FROM workout_logs
+        `SELECT coaching_mode AS mode, actual_stress, completed_at FROM workout_logs
          WHERE status = 'completed'
          ORDER BY completed_at DESC LIMIT 3;`
       );
@@ -242,6 +242,8 @@ export default function DashboardScreen() {
       style={styles.scrollRoot}
       contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 32 }]}
     >
+      {/* Coach Section — the primary AI-driven experience */}
+      <Text style={styles.coachLabel}>YOUR COACH</Text>
       <Text style={[styles.score, { color: accent }]}>{data.score}</Text>
       <View style={styles.bandRow}>
         <InfoChip topic="adaptation_score" color={accent}>
@@ -249,12 +251,29 @@ export default function DashboardScreen() {
         </InfoChip>
       </View>
       <Text style={styles.decisionLine}>{headline}</Text>
+      <Text style={styles.coachAttribution}>
+        Based on your training history, recovery data, and goals
+      </Text>
 
       {isWelcome && (
         <Text style={styles.welcomeHint}>
           Complete your first workout to see detailed coaching insights
         </Text>
       )}
+
+      {/* Coaching insights — nudges and positive notes prominently */}
+      {coaching?.positive_notes && coaching.positive_notes.length > 0 ? (
+        <PositiveNotesSection notes={coaching.positive_notes} />
+      ) : null}
+
+      {coaching?.nudges && coaching.nudges.length > 0 ? (
+        <View style={styles.coachingInsights}>
+          <Text style={styles.insightsHeader}>COACH INSIGHTS</Text>
+          {coaching.nudges.map((nudge, i) => (
+            <Text key={i} style={styles.insightText}>{nudge}</Text>
+          ))}
+        </View>
+      ) : null}
 
       {todayPlan && (
         <TodayPlanCard
@@ -269,14 +288,6 @@ export default function DashboardScreen() {
           onViewAll={() => navigation.navigate('Train', { screen: 'WorkoutHistory' })}
         />
       )}
-
-      {coaching?.nudges && coaching.nudges.length > 0 ? (
-        <NudgesSection nudges={coaching.nudges} />
-      ) : null}
-
-      {coaching?.positive_notes && coaching.positive_notes.length > 0 ? (
-        <PositiveNotesSection notes={coaching.positive_notes} />
-      ) : null}
 
       {!isWelcome && explanation.hasServerData ? (
         <WhyTodaySection explanation={explanation} score={data.score} />
@@ -301,16 +312,6 @@ export default function DashboardScreen() {
         </Text>
       </Pressable>
     </ScrollView>
-  );
-}
-
-function NudgesSection({ nudges }: { nudges: string[] }) {
-  return (
-    <View style={styles.nudgesContainer}>
-      {nudges.map((nudge, i) => (
-        <Text key={i} style={styles.nudgeText}>{nudge}</Text>
-      ))}
-    </View>
   );
 }
 
@@ -381,7 +382,7 @@ function TodayPlanCard({
   if (day.rest_day) {
     return (
       <View style={styles.todayCard}>
-        <Text style={styles.todayHeader}>TODAY&apos;S PLAN</Text>
+        <Text style={styles.todayHeader}>AI-GENERATED PLAN</Text>
         <Text style={styles.todaySessionType}>REST DAY</Text>
         {day.rationale ? (
           <Text style={styles.todayRationale}>{day.rationale}</Text>
@@ -393,7 +394,7 @@ function TodayPlanCard({
   if (day.workout_status === 'completed') {
     return (
       <View style={styles.todayCard}>
-        <Text style={styles.todayHeader}>TODAY&apos;S PLAN</Text>
+        <Text style={styles.todayHeader}>AI-GENERATED PLAN</Text>
         <Text style={styles.todaySessionType}>{sessionLabel}</Text>
         <Text style={styles.todayCompleted}>COMPLETED</Text>
       </View>
@@ -402,10 +403,10 @@ function TodayPlanCard({
 
   return (
     <View style={styles.todayCard}>
-      <Text style={styles.todayHeader}>TODAY&apos;S PLAN</Text>
+      <Text style={styles.todayHeader}>AI-GENERATED PLAN</Text>
       <Text style={styles.todaySessionType}>{sessionLabel}</Text>
       {day.rationale ? (
-        <Text style={styles.todayRationale}>{day.rationale}</Text>
+        <Text style={styles.todayRationaleProminent}>{day.rationale}</Text>
       ) : null}
       {mainExercises.slice(0, 4).map((ex, i) => (
         <Text key={i} style={styles.todayExercise}>
@@ -444,7 +445,7 @@ function RecentWorkoutsSection({
       {workouts.map((w, i) => {
         const d = new Date(w.completedAt);
         const dateStr = `${d.getMonth() + 1}/${d.getDate()}`;
-        const modeLabel = w.mode.replace(/_/g, ' ').toUpperCase();
+        const modeLabel = (w.mode ?? 'workout').replace(/_/g, ' ').toUpperCase();
         return (
           <View key={i} style={styles.recentRow}>
             <Text style={styles.recentDate}>{dateStr}</Text>
@@ -592,17 +593,43 @@ const styles = StyleSheet.create({
     marginBottom: 32,
     paddingHorizontal: 16,
   },
-  nudgesContainer: {
-    width: '100%',
-    marginBottom: 16,
-    paddingHorizontal: 8,
+  coachLabel: {
+    color: '#555555',
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 3,
+    marginBottom: 12,
+    fontFamily: MONO,
   },
-  nudgeText: {
-    color: '#999999',
+  coachAttribution: {
+    color: '#444444',
+    fontSize: 11,
+    textAlign: 'center',
+    marginBottom: 24,
+    fontStyle: 'italic',
+  },
+  coachingInsights: {
+    width: '100%',
+    borderWidth: 0.5,
+    borderColor: '#222244',
+    backgroundColor: '#0A0A14',
+    padding: 16,
+    marginBottom: 24,
+  },
+  insightsHeader: {
+    color: '#6666AA',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 3,
+    marginBottom: 10,
+    fontFamily: MONO,
+  },
+  insightText: {
+    color: '#9999CC',
     fontSize: 12,
     lineHeight: 18,
     marginBottom: 6,
-    paddingLeft: 12,
+    paddingLeft: 8,
   },
   positiveContainer: {
     width: '100%',
@@ -853,6 +880,16 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 20,
     marginBottom: 12,
+  },
+  todayRationaleProminent: {
+    color: '#CCCCCC',
+    fontSize: 14,
+    lineHeight: 22,
+    marginBottom: 12,
+    fontStyle: 'italic',
+    borderLeftWidth: 2,
+    borderLeftColor: '#2ECC71',
+    paddingLeft: 12,
   },
   todayExercise: {
     color: '#CCCCCC',

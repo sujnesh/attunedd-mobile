@@ -10,10 +10,55 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../../services/apiClient';
+import { executeSql } from '../../db/database';
 import type { WorkoutHistoryEntry, WorkoutHistoryResponse } from '../../types/api';
 import type { WorkoutHistoryProps } from '../../navigation/types';
 
 const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
+
+async function fetchLocalWorkouts(): Promise<WorkoutHistoryEntry[]> {
+  const [logResult] = await executeSql(
+    `SELECT local_id, server_id, coaching_mode, actual_stress, allowed_stress,
+            started_at, completed_at
+     FROM workout_logs WHERE status = 'completed'
+     ORDER BY completed_at DESC LIMIT 20;`
+  );
+  const entries: WorkoutHistoryEntry[] = [];
+  for (let i = 0; i < logResult.rows.length; i++) {
+    const row = logResult.rows.item(i);
+    const [setResult] = await executeSql(
+      `SELECT exercise_name, set_number, weight, reps, rpe, stress_units
+       FROM exercise_sets WHERE workout_log_local_id = ?
+       ORDER BY local_id;`,
+      [row.local_id]
+    );
+    const sets: WorkoutHistoryEntry['exercise_sets'] = [];
+    for (let j = 0; j < setResult.rows.length; j++) {
+      const s = setResult.rows.item(j);
+      sets.push({
+        exercise_name: s.exercise_name,
+        set_number: s.set_number,
+        weight: s.weight,
+        reps: s.reps,
+        rpe: s.rpe,
+        stress_units: s.stress_units,
+        cap_override: false,
+      });
+    }
+    entries.push({
+      id: row.server_id ? Number(row.server_id) : row.local_id,
+      status: 'completed',
+      coaching_mode: row.coaching_mode,
+      actual_stress: row.actual_stress,
+      allowed_stress: row.allowed_stress,
+      started_at: row.started_at,
+      completed_at: row.completed_at,
+      risk_band: null,
+      exercise_sets: sets,
+    });
+  }
+  return entries;
+}
 
 export default function WorkoutHistoryScreen({ navigation }: WorkoutHistoryProps) {
   const insets = useSafeAreaInsets();
@@ -31,12 +76,20 @@ export default function WorkoutHistoryScreen({ navigation }: WorkoutHistoryProps
   useEffect(() => {
     (async () => {
       try {
+        // Try server first
         const body = await fetchPage(1);
         setWorkouts(body.workouts);
         setHasMore(body.has_more);
         setPage(1);
       } catch {
-        // silently fail
+        // Fall back to local database
+        try {
+          const local = await fetchLocalWorkouts();
+          setWorkouts(local);
+          setHasMore(false);
+        } catch {
+          // no data available
+        }
       } finally {
         setLoading(false);
       }
@@ -157,7 +210,8 @@ function bestSet(sets: WorkoutHistoryEntry['exercise_sets']): string {
   const withWeight = sets.filter(s => s.weight != null && s.weight > 0);
   if (withWeight.length === 0) return '';
   const top = withWeight.reduce((a, b) => ((a.weight ?? 0) > (b.weight ?? 0) ? a : b));
-  return ` — ${top.weight}x${top.reps}@${top.rpe}`;
+  const rir = top.rpe != null ? 10 - top.rpe : null;
+  return ` — ${top.weight}x${top.reps}${rir != null ? ` r${rir}` : ''}`;
 }
 
 function formatDate(iso: string): string {

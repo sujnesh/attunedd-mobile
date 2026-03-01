@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import { Alert, Linking } from 'react-native';
+import { NavigationContainer, type LinkingOptions } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Text } from 'react-native';
@@ -17,6 +18,15 @@ import EducationProvider from '../components/EducationProvider';
 import { getMeta, setMeta } from '../services/metaStateService';
 import { onAuthChange, emitAuthChange } from '../services/authEvents';
 import { api } from '../services/apiClient';
+
+const linking: LinkingOptions<RootTabParamList> = {
+  prefixes: ['attunedd://'],
+  config: {
+    screens: {
+      Settings: 'whoop/callback',
+    },
+  },
+};
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
@@ -106,9 +116,34 @@ export default function AppNavigator() {
     return null;
   }
 
+  // Handle WHOOP OAuth deep link callback
+  useEffect(() => {
+    const handleDeepLink = (event: { url: string }) => {
+      const url = event.url;
+      if (url.startsWith('attunedd://whoop/callback')) {
+        const params = new URLSearchParams(url.split('?')[1] ?? '');
+        if (params.get('status') === 'connected') {
+          Alert.alert('WHOOP Connected', 'Your WHOOP account is now linked. Data will sync shortly.');
+        } else if (params.get('error')) {
+          const err = params.get('error');
+          Alert.alert('WHOOP Error', err === 'denied' ? 'Authorization was denied.' : `Connection failed: ${err}`);
+        }
+      }
+    };
+
+    const sub = Linking.addEventListener('url', handleDeepLink);
+
+    // Check if app was opened via deep link
+    Linking.getInitialURL().then((url) => {
+      if (url) handleDeepLink({ url });
+    });
+
+    return () => sub.remove();
+  }, []);
+
   return (
     <EducationProvider>
-      <NavigationContainer>
+      <NavigationContainer linking={linking}>
         {!authToken ? (
           <AuthNavigator />
         ) : !hasSeenWelcome ? (
