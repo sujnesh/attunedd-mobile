@@ -190,10 +190,13 @@ export default function HealthScreen() {
           <View style={styles.emptyState}>
             <Text style={styles.emptyTitle}>No health data yet</Text>
             <Text style={styles.emptyText}>
-              Connect WHOOP in Settings to see recovery metrics and workout history
+              Connect WHOOP in Settings to see recovery, HRV, and sleep metrics
             </Text>
             <Text style={styles.emptyText}>
-              Activities from WHOOP and Apple Health will appear here
+              Apple Health activities (runs, walks) will appear here automatically once permissions are granted
+            </Text>
+            <Text style={styles.emptyText}>
+              Your workout data from the Train tab will also sync here
             </Text>
           </View>
         )}

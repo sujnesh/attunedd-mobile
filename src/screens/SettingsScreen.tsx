@@ -25,11 +25,59 @@ interface ProfileData {
   } | null;
 }
 
+const PREF_OPTIONS: Record<string, { label: string; values: { value: string; label: string }[] }> = {
+  primary_goal: {
+    label: 'GOAL',
+    values: [
+      { value: 'hypertrophy', label: 'HYPERTROPHY' },
+      { value: 'strength', label: 'STRENGTH' },
+      { value: 'fat_loss', label: 'FAT LOSS' },
+      { value: 'endurance', label: 'ENDURANCE' },
+    ],
+  },
+  experience_level: {
+    label: 'EXPERIENCE',
+    values: [
+      { value: 'beginner', label: 'BEGINNER' },
+      { value: 'intermediate', label: 'INTERMEDIATE' },
+      { value: 'advanced', label: 'ADVANCED' },
+    ],
+  },
+  days_per_week: {
+    label: 'DAYS / WEEK',
+    values: [
+      { value: '3', label: '3' },
+      { value: '4', label: '4' },
+      { value: '5', label: '5' },
+      { value: '6', label: '6' },
+    ],
+  },
+  equipment: {
+    label: 'EQUIPMENT',
+    values: [
+      { value: 'gym', label: 'FULL GYM' },
+      { value: 'home', label: 'HOME' },
+      { value: 'minimal', label: 'MINIMAL' },
+    ],
+  },
+  session_minutes: {
+    label: 'SESSION',
+    values: [
+      { value: '30', label: '30 MIN' },
+      { value: '45', label: '45 MIN' },
+      { value: '60', label: '60 MIN' },
+      { value: '90', label: '90 MIN' },
+    ],
+  },
+};
+
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
   const [whoopBusy, setWhoopBusy] = useState(false);
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const fetchProfile = useCallback(() => {
     apiCached<ProfileData>('/api/profile', 'cache_profile')
@@ -104,6 +152,32 @@ export default function SettingsScreen() {
     ]);
   };
 
+  const handlePrefSelect = async (key: string, value: string) => {
+    if (!profile?.preferences || saving) return;
+    setSaving(true);
+    setEditingKey(null);
+
+    const numericKeys = ['days_per_week', 'session_minutes'];
+    const payload: Record<string, unknown> = {
+      ...profile.preferences,
+      [key]: numericKeys.includes(key) ? parseInt(value, 10) : value,
+    };
+
+    try {
+      await api('/api/onboarding/preferences', {
+        method: 'POST',
+        body: { preferences: payload },
+      });
+      // Refresh profile to get updated data + potentially regenerated plan
+      const fresh = await api<ProfileData>('/api/profile');
+      setProfile(fresh);
+    } catch {
+      Alert.alert('Error', 'Failed to update preference');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const prefs = profile?.preferences;
   const whoopConnected = profile?.whoop_connected ?? false;
 
@@ -121,7 +195,7 @@ export default function SettingsScreen() {
         <Text style={styles.sectionHeader}>ACCOUNT</Text>
         <View style={styles.row}>
           <Text style={styles.label}>EMAIL</Text>
-          <Text style={styles.value}>{profile?.user.email ?? '—'}</Text>
+          <Text style={styles.value}>{profile?.user.email ?? '\u2014'}</Text>
         </View>
       </View>
 
@@ -140,30 +214,48 @@ export default function SettingsScreen() {
         </View>
       )}
 
-      {/* Preferences */}
+      {/* Preferences — editable */}
       {prefs && (
         <View style={styles.section}>
           <Text style={styles.sectionHeader}>TRAINING PREFERENCES</Text>
-          <View style={styles.row}>
-            <Text style={styles.label}>GOAL</Text>
-            <Text style={styles.value}>{formatValue(prefs.primary_goal)}</Text>
-          </View>
-          <View style={styles.row}>
-            <Text style={styles.label}>EXPERIENCE</Text>
-            <Text style={styles.value}>{formatValue(prefs.experience_level)}</Text>
-          </View>
-          <View style={styles.row}>
-            <Text style={styles.label}>DAYS / WEEK</Text>
-            <Text style={styles.value}>{prefs.days_per_week}</Text>
-          </View>
-          <View style={styles.row}>
-            <Text style={styles.label}>EQUIPMENT</Text>
-            <Text style={styles.value}>{formatValue(prefs.equipment)}</Text>
-          </View>
-          <View style={styles.row}>
-            <Text style={styles.label}>SESSION</Text>
-            <Text style={styles.value}>{prefs.session_minutes} MIN</Text>
-          </View>
+          <Text style={styles.editHint}>Tap a value to change it</Text>
+
+          {Object.entries(PREF_OPTIONS).map(([key, config]) => {
+            const currentValue = String((prefs as Record<string, unknown>)[key] ?? '');
+            const isEditing = editingKey === key;
+
+            return (
+              <View key={key}>
+                <Pressable
+                  onPress={() => setEditingKey(isEditing ? null : key)}
+                  style={styles.row}>
+                  <Text style={styles.label}>{config.label}</Text>
+                  <Text style={[styles.value, styles.editable]}>
+                    {formatValue(currentValue)}
+                    {saving && editingKey === key ? ' ...' : ''}
+                  </Text>
+                </Pressable>
+
+                {isEditing && (
+                  <View style={styles.optionsRow}>
+                    {config.values.map((opt) => {
+                      const isSelected = opt.value === currentValue;
+                      return (
+                        <Pressable
+                          key={opt.value}
+                          onPress={() => handlePrefSelect(key, opt.value)}
+                          style={[styles.optionChip, isSelected && styles.optionChipSelected]}>
+                          <Text style={[styles.optionChipText, isSelected && styles.optionChipTextSelected]}>
+                            {opt.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                )}
+              </View>
+            );
+          })}
         </View>
       )}
 
@@ -251,7 +343,12 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 3,
-    marginBottom: 12,
+    marginBottom: 4,
+  },
+  editHint: {
+    color: '#333333',
+    fontSize: 10,
+    marginBottom: 8,
   },
   row: {
     flexDirection: 'row',
@@ -268,6 +365,35 @@ const styles = StyleSheet.create({
     color: '#EAEAEA',
     fontSize: 13,
     fontFamily: MONO,
+  },
+  editable: {
+    color: '#2ECC71',
+  },
+  optionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingBottom: 12,
+  },
+  optionChip: {
+    borderWidth: 1,
+    borderColor: '#333333',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  optionChipSelected: {
+    borderColor: '#2ECC71',
+    backgroundColor: '#0D1A0D',
+  },
+  optionChipText: {
+    color: '#888888',
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 1,
+    fontFamily: MONO,
+  },
+  optionChipTextSelected: {
+    color: '#2ECC71',
   },
   valueConnected: {
     color: '#2ECC71',

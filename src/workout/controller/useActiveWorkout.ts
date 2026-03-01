@@ -223,7 +223,7 @@ export function useActiveWorkout(): UseActiveWorkoutReturn {
     if (!session) return null;
 
     const deviation = checkDeviation(
-      exerciseName, rpe, session.cumulativeStress, session.allowedStress, session.caps
+      exerciseName, rpe, session.cumulativeStress, session.allowedStress, session.caps, overrides
     );
     if (deviation) {
       return deviation;

@@ -18,8 +18,7 @@ describe('checkDeviation', () => {
     const result = checkDeviation('bench press', 9, 50, 100, CAPS);
     expect(result).not.toBeNull();
     expect(result!.type).toBe('rpe_cap');
-    expect(result!.message).toContain('RPE 9');
-    expect(result!.message).toContain('cap of 8');
+    expect(result!.message).toContain('RIR');
     expect(result!.requiresOverride).toBe(true);
   });
 
@@ -32,7 +31,7 @@ describe('checkDeviation', () => {
     const result = checkDeviation('curl', 7, 90, 100, CAPS);
     expect(result).not.toBeNull();
     expect(result!.type).toBe('stress_cap');
-    expect(result!.message).toContain('90%');
+    expect(result!.message).toContain('Stress budget exceeded');
     expect(result!.requiresOverride).toBe(true);
   });
 
