@@ -1,14 +1,15 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { apiCached } from '../services/apiClient';
+import { api, apiCached } from '../services/apiClient';
 import { logout } from '../navigation/AppNavigator';
 
 const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
 
 interface ProfileData {
   user: { id: number; email: string };
+  whoop_connected: boolean;
   preferences: {
     training_type: string;
     primary_goal: string;
@@ -28,13 +29,18 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [whoopBusy, setWhoopBusy] = useState(false);
+
+  const fetchProfile = useCallback(() => {
+    apiCached<ProfileData>('/api/profile', 'cache_profile')
+      .then(setProfile)
+      .catch(() => {});
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
-      apiCached<ProfileData>('/api/profile', 'cache_profile')
-        .then(setProfile)
-        .catch(() => {});
-    }, []),
+      fetchProfile();
+    }, [fetchProfile]),
   );
 
   const handleLogout = () => {
@@ -51,7 +57,55 @@ export default function SettingsScreen() {
     ]);
   };
 
+  const handleConnectWhoop = async () => {
+    if (whoopBusy) return;
+    setWhoopBusy(true);
+    try {
+      const data = await api<{ authorize_url: string }>('/api/whoop/authorize');
+      await Linking.openURL(data.authorize_url);
+    } catch {
+      Alert.alert('Error', 'Failed to start WHOOP connection');
+    } finally {
+      setWhoopBusy(false);
+    }
+  };
+
+  const handleSyncWhoop = async () => {
+    if (whoopBusy) return;
+    setWhoopBusy(true);
+    try {
+      await api('/api/whoop/sync', { method: 'POST' });
+      Alert.alert('Sync Started', 'WHOOP data is syncing in the background');
+    } catch {
+      Alert.alert('Error', 'Failed to start sync');
+    } finally {
+      setWhoopBusy(false);
+    }
+  };
+
+  const handleDisconnectWhoop = () => {
+    Alert.alert('Disconnect WHOOP', 'Are you sure you want to disconnect your WHOOP?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Disconnect',
+        style: 'destructive',
+        onPress: async () => {
+          setWhoopBusy(true);
+          try {
+            await api('/api/whoop', { method: 'DELETE' });
+            setProfile((prev) => prev ? { ...prev, whoop_connected: false } : prev);
+          } catch {
+            Alert.alert('Error', 'Failed to disconnect WHOOP');
+          } finally {
+            setWhoopBusy(false);
+          }
+        },
+      },
+    ]);
+  };
+
   const prefs = profile?.preferences;
+  const whoopConnected = profile?.whoop_connected ?? false;
 
   return (
     <ScrollView
@@ -118,8 +172,39 @@ export default function SettingsScreen() {
         <Text style={styles.sectionHeader}>INTEGRATIONS</Text>
         <View style={styles.row}>
           <Text style={styles.label}>WHOOP</Text>
-          <Text style={styles.valueInactive}>NOT CONNECTED</Text>
+          {whoopConnected ? (
+            <Text style={styles.valueConnected}>CONNECTED</Text>
+          ) : (
+            <Text style={styles.valueInactive}>NOT CONNECTED</Text>
+          )}
         </View>
+        {whoopConnected ? (
+          <View style={styles.whoopActions}>
+            <Pressable
+              style={({ pressed }) => [styles.whoopBtn, pressed && styles.pressed]}
+              onPress={handleSyncWhoop}
+              disabled={whoopBusy}>
+              <Text style={styles.whoopBtnText}>
+                {whoopBusy ? 'SYNCING...' : 'SYNC NOW'}
+              </Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.whoopBtnDanger, pressed && styles.pressed]}
+              onPress={handleDisconnectWhoop}
+              disabled={whoopBusy}>
+              <Text style={styles.whoopBtnDangerText}>DISCONNECT</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <Pressable
+            style={({ pressed }) => [styles.whoopBtn, pressed && styles.pressed]}
+            onPress={handleConnectWhoop}
+            disabled={whoopBusy}>
+            <Text style={styles.whoopBtnText}>
+              {whoopBusy ? 'CONNECTING...' : 'CONNECT WHOOP'}
+            </Text>
+          </Pressable>
+        )}
       </View>
 
       {/* Logout */}
@@ -184,9 +269,51 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: MONO,
   },
+  valueConnected: {
+    color: '#2ECC71',
+    fontSize: 12,
+    fontWeight: '600',
+    fontFamily: MONO,
+    letterSpacing: 1,
+  },
   valueInactive: {
     color: '#555555',
     fontSize: 12,
+    fontFamily: MONO,
+  },
+  whoopActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  whoopBtn: {
+    borderWidth: 0.5,
+    borderColor: '#2ECC71',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  pressed: {
+    backgroundColor: '#151515',
+  },
+  whoopBtnText: {
+    color: '#2ECC71',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 2,
+    fontFamily: MONO,
+  },
+  whoopBtnDanger: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  whoopBtnDangerText: {
+    color: '#555555',
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 2,
     fontFamily: MONO,
   },
   logoutBtn: {
