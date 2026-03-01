@@ -112,11 +112,7 @@ export default function AppNavigator() {
     setHasSeenWelcome(true);
   }, []);
 
-  if (checking) {
-    return null;
-  }
-
-  // Handle WHOOP OAuth deep link callback
+  // Handle WHOOP OAuth deep link callback — must be before early return
   useEffect(() => {
     const handleDeepLink = (event: { url: string }) => {
       const url = event.url;
@@ -140,6 +136,10 @@ export default function AppNavigator() {
 
     return () => sub.remove();
   }, []);
+
+  if (checking) {
+    return null;
+  }
 
   return (
     <EducationProvider>
