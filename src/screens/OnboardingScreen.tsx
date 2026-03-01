@@ -6,6 +6,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -98,8 +99,17 @@ const DEFAULTS: Record<string, string> = {
 
 export default function OnboardingScreen() {
   const insets = useSafeAreaInsets();
+  const [step, setStep] = useState(0);
   const [selections, setSelections] = useState<Record<string, string>>(DEFAULTS);
+  const [trainingHistory, setTrainingHistory] = useState('');
+  const [liftUnit, setLiftUnit] = useState<'kg' | 'lb'>('kg');
+  const [bench, setBench] = useState('');
+  const [squat, setSquat] = useState('');
+  const [deadlift, setDeadlift] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  const isBeginner = selections.experience_level === 'beginner';
+  const totalSteps = isBeginner ? 1 : 3;
 
   const select = (key: string, value: string) => {
     setSelections((prev) => ({ ...prev, [key]: value }));
@@ -108,18 +118,21 @@ export default function OnboardingScreen() {
   const handleSubmit = async () => {
     setSubmitting(true);
     try {
+      const body: Record<string, unknown> = {
+        preferences: {
+          training_type: selections.training_type,
+          primary_goal: selections.primary_goal,
+          experience_level: selections.experience_level,
+          days_per_week: parseInt(selections.days_per_week, 10),
+          equipment: selections.equipment,
+          session_minutes: parseInt(selections.session_minutes, 10),
+          training_history: trainingHistory || undefined,
+          current_lifts: buildCurrentLifts(),
+        },
+      };
       await api('/api/onboarding/preferences', {
         method: 'POST',
-        body: {
-          preferences: {
-            training_type: selections.training_type,
-            primary_goal: selections.primary_goal,
-            experience_level: selections.experience_level,
-            days_per_week: parseInt(selections.days_per_week, 10),
-            equipment: selections.equipment,
-            session_minutes: parseInt(selections.session_minutes, 10),
-          },
-        },
+        body,
       });
       await completeOnboarding();
     } catch (err) {
@@ -135,6 +148,29 @@ export default function OnboardingScreen() {
     }
   };
 
+  const buildCurrentLifts = () => {
+    const b = parseFloat(bench);
+    const s = parseFloat(squat);
+    const d = parseFloat(deadlift);
+    if (!b && !s && !d) return undefined;
+    return {
+      bench: b || undefined,
+      squat: s || undefined,
+      deadlift: d || undefined,
+      unit: liftUnit,
+    };
+  };
+
+  const handleNext = () => {
+    if (step === 0 && isBeginner) {
+      handleSubmit();
+    } else if (step < totalSteps - 1) {
+      setStep(step + 1);
+    } else {
+      handleSubmit();
+    }
+  };
+
   return (
     <ScrollView
       style={styles.root}
@@ -142,44 +178,176 @@ export default function OnboardingScreen() {
         styles.content,
         { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 32 },
       ]}>
-      <Text style={styles.title}>SET UP YOUR PROFILE</Text>
-      <Text style={styles.subtitle}>
-        Tell us about your training so we can calibrate coaching.
-      </Text>
-
-      {GROUPS.map((group) => (
-        <View key={group.key} style={styles.group}>
-          <Text style={styles.groupLabel}>{group.label}</Text>
-          <View style={styles.optionsRow}>
-            {group.options.map((opt) => {
-              const selected = selections[group.key] === opt.value;
-              return (
-                <Pressable
-                  key={opt.value}
-                  onPress={() => select(group.key, opt.value)}
-                  style={[styles.option, selected && styles.optionSelected]}>
-                  <Text
-                    style={[
-                      styles.optionText,
-                      selected && styles.optionTextSelected,
-                    ]}>
-                    {opt.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+      {/* Progress dots */}
+      {totalSteps > 1 && (
+        <View style={styles.dots}>
+          {Array.from({ length: totalSteps }).map((_, i) => (
+            <View
+              key={i}
+              style={[styles.dot, i === step && styles.dotActive]}
+            />
+          ))}
         </View>
-      ))}
+      )}
 
-      <Pressable
-        onPress={handleSubmit}
-        style={[styles.submitBtn, submitting && styles.submitDisabled]}
-        disabled={submitting}>
-        <Text style={styles.submitText}>
-          {submitting ? 'SAVING...' : 'CONTINUE'}
-        </Text>
-      </Pressable>
+      {step === 0 && (
+        <>
+          <Text style={styles.title}>SET UP YOUR PROFILE</Text>
+          <Text style={styles.subtitle}>
+            Tell us about your training so we can calibrate coaching.
+          </Text>
+
+          {GROUPS.map((group) => (
+            <View key={group.key} style={styles.group}>
+              <Text style={styles.groupLabel}>{group.label}</Text>
+              <View style={styles.optionsRow}>
+                {group.options.map((opt) => {
+                  const selected = selections[group.key] === opt.value;
+                  return (
+                    <Pressable
+                      key={opt.value}
+                      onPress={() => select(group.key, opt.value)}
+                      style={[styles.option, selected && styles.optionSelected]}>
+                      <Text
+                        style={[
+                          styles.optionText,
+                          selected && styles.optionTextSelected,
+                        ]}>
+                        {opt.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          ))}
+        </>
+      )}
+
+      {step === 1 && (
+        <>
+          <Text style={styles.title}>TELL US ABOUT YOUR TRAINING</Text>
+          <Text style={styles.subtitle}>
+            What have your last few workouts looked like?
+          </Text>
+
+          <TextInput
+            style={styles.textArea}
+            multiline
+            numberOfLines={5}
+            maxLength={500}
+            placeholder="e.g., I usually do push/pull/legs, bench around 80kg, squat 100kg, run 5k twice a week"
+            placeholderTextColor="#444444"
+            value={trainingHistory}
+            onChangeText={setTrainingHistory}
+            textAlignVertical="top"
+          />
+        </>
+      )}
+
+      {step === 2 && (
+        <>
+          <Text style={styles.title}>YOUR CURRENT LIFTS</Text>
+          <Text style={styles.subtitle}>
+            Approximate 1-rep max or recent heavy set. Helps us calibrate your
+            plan.
+          </Text>
+
+          <View style={styles.unitRow}>
+            <Pressable
+              onPress={() => setLiftUnit('kg')}
+              style={[
+                styles.unitBtn,
+                liftUnit === 'kg' && styles.unitBtnActive,
+              ]}>
+              <Text
+                style={[
+                  styles.unitText,
+                  liftUnit === 'kg' && styles.unitTextActive,
+                ]}>
+                KG
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setLiftUnit('lb')}
+              style={[
+                styles.unitBtn,
+                liftUnit === 'lb' && styles.unitBtnActive,
+              ]}>
+              <Text
+                style={[
+                  styles.unitText,
+                  liftUnit === 'lb' && styles.unitTextActive,
+                ]}>
+                LB
+              </Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.liftRow}>
+            <Text style={styles.liftLabel}>BENCH PRESS</Text>
+            <TextInput
+              style={styles.liftInput}
+              keyboardType="numeric"
+              placeholder="—"
+              placeholderTextColor="#444444"
+              value={bench}
+              onChangeText={setBench}
+            />
+          </View>
+          <View style={styles.liftRow}>
+            <Text style={styles.liftLabel}>SQUAT</Text>
+            <TextInput
+              style={styles.liftInput}
+              keyboardType="numeric"
+              placeholder="—"
+              placeholderTextColor="#444444"
+              value={squat}
+              onChangeText={setSquat}
+            />
+          </View>
+          <View style={styles.liftRow}>
+            <Text style={styles.liftLabel}>DEADLIFT</Text>
+            <TextInput
+              style={styles.liftInput}
+              keyboardType="numeric"
+              placeholder="—"
+              placeholderTextColor="#444444"
+              value={deadlift}
+              onChangeText={setDeadlift}
+            />
+          </View>
+        </>
+      )}
+
+      <View style={styles.btnRow}>
+        {step > 0 && (
+          <Pressable
+            onPress={() => setStep(step - 1)}
+            style={styles.backBtn}>
+            <Text style={styles.backText}>BACK</Text>
+          </Pressable>
+        )}
+
+        {step > 0 && step < totalSteps - 1 && (
+          <Pressable onPress={() => setStep(step + 1)} style={styles.skipBtn}>
+            <Text style={styles.skipText}>SKIP</Text>
+          </Pressable>
+        )}
+
+        <Pressable
+          onPress={handleNext}
+          style={[styles.submitBtn, submitting && styles.submitDisabled]}
+          disabled={submitting}>
+          <Text style={styles.submitText}>
+            {submitting
+              ? 'SAVING...'
+              : step === totalSteps - 1
+                ? 'CONTINUE'
+                : 'NEXT'}
+          </Text>
+        </Pressable>
+      </View>
     </ScrollView>
   );
 }
@@ -191,6 +359,21 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 24,
+  },
+  dots: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 24,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#333333',
+  },
+  dotActive: {
+    backgroundColor: '#EAEAEA',
   },
   title: {
     color: '#EAEAEA',
@@ -243,8 +426,100 @@ const styles = StyleSheet.create({
   optionTextSelected: {
     color: '#22C55E',
   },
+  textArea: {
+    borderWidth: 1,
+    borderColor: '#333333',
+    color: '#EAEAEA',
+    fontSize: 14,
+    lineHeight: 22,
+    padding: 16,
+    minHeight: 120,
+    fontFamily: MONO,
+  },
+  unitRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 12,
+    marginBottom: 24,
+  },
+  unitBtn: {
+    borderWidth: 1,
+    borderColor: '#333333',
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+  },
+  unitBtnActive: {
+    borderColor: '#22C55E',
+    backgroundColor: '#0D1A0D',
+  },
+  unitText: {
+    color: '#888888',
+    fontSize: 13,
+    fontWeight: '600',
+    letterSpacing: 2,
+    fontFamily: MONO,
+  },
+  unitTextActive: {
+    color: '#22C55E',
+  },
+  liftRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#222222',
+    paddingBottom: 12,
+  },
+  liftLabel: {
+    color: '#888888',
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 2,
+    fontFamily: MONO,
+  },
+  liftInput: {
+    borderWidth: 1,
+    borderColor: '#333333',
+    color: '#EAEAEA',
+    fontSize: 16,
+    fontFamily: MONO,
+    width: 80,
+    textAlign: 'center',
+    paddingVertical: 8,
+  },
+  btnRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 12,
+    marginTop: 24,
+  },
+  backBtn: {
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderWidth: 1,
+    borderColor: '#333333',
+  },
+  backText: {
+    color: '#888888',
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 2,
+    fontFamily: MONO,
+  },
+  skipBtn: {
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+  },
+  skipText: {
+    color: '#555555',
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 2,
+    fontFamily: MONO,
+  },
   submitBtn: {
-    marginTop: 16,
+    flex: 1,
     paddingVertical: 16,
     alignItems: 'center',
     borderWidth: 1,
