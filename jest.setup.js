@@ -25,10 +25,13 @@ jest.mock('react-native-push-notification', () => ({
 jest.mock('@react-native-community/push-notification-ios', () => ({}));
 
 jest.mock('react-native-health', () => ({
+  __esModule: true,
   default: {
-    initHealthKit: jest.fn(),
-    getSamples: jest.fn(),
-    getHeartRateSamples: jest.fn(),
+    initHealthKit: jest.fn((_opts, cb) => cb(null)),
+    isAvailable: jest.fn((cb) => cb(null, true)),
+    getAuthStatus: jest.fn((_opts, cb) => cb(null, { permissions: { read: [2, 2, 2] } })),
+    getSamples: jest.fn((_opts, cb) => cb(null, [])),
+    getHeartRateSamples: jest.fn((_opts, cb) => cb(null, [])),
     Constants: {
       Permissions: {
         Workout: 'Workout',

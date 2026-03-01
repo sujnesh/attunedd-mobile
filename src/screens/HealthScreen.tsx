@@ -18,7 +18,11 @@ import { apiCached } from '../services/apiClient';
 import { executeSql } from '../db/database';
 import { ingestDeviceActivities } from '../health/ingestionEngine';
 import type { WhoopRecentResponse, WhoopCycleData, WhoopSleepData } from '../types/api';
-import type { PermissionStatus } from '../health/appleHealth';
+import {
+  initAppleHealth,
+  getPermissionStatus as getAppleHealthPermission,
+  type PermissionStatus,
+} from '../health/appleHealth';
 
 const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
 
@@ -69,8 +73,7 @@ export default function HealthScreen() {
       // Load permission status
       if (Platform.OS === 'ios') {
         try {
-          const { getPermissionStatus: getPS } = await import('../health/appleHealth');
-          const status = await getPS();
+          const status = await getAppleHealthPermission();
           setPermissionStatus(status);
         } catch {
           setPermissionStatus('not_determined');
@@ -143,37 +146,41 @@ export default function HealthScreen() {
     if (Platform.OS !== 'ios' || granting) return;
     setGranting(true);
     try {
-      const { initAppleHealth, getPermissionStatus: checkPerm } = await import('../health/appleHealth');
       await initAppleHealth();
 
-      // Check if permissions were actually granted
-      const status = await checkPerm();
-      if (status === 'granted') {
-        // Try immediate ingestion
-        try {
-          const authToken = await getMeta('auth_token');
-          if (authToken) {
-            await ingestDeviceActivities(30, authToken);
-          }
-        } catch {
-          // ingestion failure is non-fatal
+      // Try immediate ingestion after granting
+      try {
+        const authToken = await getMeta('auth_token');
+        if (authToken) {
+          await ingestDeviceActivities(30, authToken);
         }
-        await load();
-      } else {
-        // iOS only shows the HealthKit dialog once.
-        // If we're here, the user was already prompted or denied.
-        await load();
+      } catch {
+        // ingestion failure is non-fatal
+      }
+
+      await load();
+
+      // Check if we actually got data — if not, guide user to Settings
+      const status = await getAppleHealthPermission();
+      if (status !== 'granted') {
         Alert.alert(
           'Health Access',
-          'If the permission dialog didn\'t appear, you may have already been prompted.\n\nGo to Settings → Health → Attunedd to enable access.',
+          'iOS only shows the permission dialog once. Go to Settings → Health → Attunedd to enable access.',
           [
             { text: 'Open Settings', onPress: () => Linking.openSettings() },
             { text: 'OK', style: 'cancel' },
           ],
         );
       }
-    } catch {
-      Alert.alert('Error', 'Could not connect to Apple Health. Please try again.');
+    } catch (err) {
+      Alert.alert(
+        'Health Access',
+        'Could not request permissions. Go to Settings → Health → Attunedd to enable access.',
+        [
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+          { text: 'OK', style: 'cancel' },
+        ],
+      );
     } finally {
       setGranting(false);
     }

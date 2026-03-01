@@ -23,6 +23,11 @@ jest.mock('../health/ingestionEngine', () => ({
   ingestDeviceActivities: jest.fn().mockResolvedValue({ ingested: 0, skipped: 0 }),
 }));
 
+jest.mock('../health/appleHealth', () => ({
+  initAppleHealth: jest.fn().mockResolvedValue(true),
+  getPermissionStatus: jest.fn().mockResolvedValue('not_determined'),
+}));
+
 const { getRecentActivities } = require('../services/healthService');
 const { getMeta } = require('../services/metaStateService');
 const { apiCached } = require('../services/apiClient');

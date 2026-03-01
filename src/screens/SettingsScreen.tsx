@@ -13,6 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { api, apiCached } from '../services/apiClient';
+import { setMeta } from '../services/metaStateService';
 import { logout } from '../navigation/AppNavigator';
 
 const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
@@ -295,11 +296,23 @@ export default function SettingsScreen() {
         method: 'POST',
         body: { preferences: prefPayload, demographics },
       });
+
+      // Bust all caches so dashboard/train screens pick up changes
+      await Promise.all([
+        setMeta('cache_profile', ''),
+        setMeta('cache_plans_current', ''),
+        setMeta('cache_coaching_today', ''),
+      ]).catch(() => {});
+
+      // Fetch fresh profile (bypasses cache)
       const fresh = await api<ProfileData>('/api/profile');
+      // Also update the cache with fresh data
+      await setMeta('cache_profile', JSON.stringify(fresh)).catch(() => {});
       setProfile(fresh);
       populateEditState(fresh);
-    } catch {
-      Alert.alert('Error', 'Failed to update settings');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to update settings';
+      Alert.alert('Error', msg);
     } finally {
       setSaving(false);
     }
