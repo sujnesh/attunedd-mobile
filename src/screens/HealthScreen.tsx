@@ -13,15 +13,23 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { getRecentActivities, type ActivityRow } from '../services/healthService';
-import { getMeta } from '../services/metaStateService';
+import { getMeta, setMeta } from '../services/metaStateService';
 import { apiCached } from '../services/apiClient';
 import { executeSql } from '../db/database';
-import { ingestDeviceActivities } from '../health/ingestionEngine';
+import { ingestDeviceActivities, syncHealthVitals } from '../health/ingestionEngine';
 import type { WhoopRecentResponse, WhoopCycleData, WhoopSleepData } from '../types/api';
 import {
   initAppleHealth,
   getPermissionStatus as getAppleHealthPermission,
+  fetchSleepData,
+  fetchDailySteps,
+  fetchRestingHeartRate,
+  fetchHRV,
+  fetchActiveEnergy,
+  fetchLatestWeight,
   type PermissionStatus,
+  type SleepSample,
+  type StepSample,
 } from '../health/appleHealth';
 
 const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
@@ -51,6 +59,14 @@ export default function HealthScreen() {
   const [cycles, setCycles] = useState<WhoopCycleData[]>([]);
   const [sleepData, setSleepData] = useState<WhoopSleepData[]>([]);
 
+  // Apple Health data
+  const [sleepSamples, setSleepSamples] = useState<SleepSample[]>([]);
+  const [dailySteps, setDailySteps] = useState<StepSample[]>([]);
+  const [restingHR, setRestingHR] = useState<number | null>(null);
+  const [hrv, setHrv] = useState<number | null>(null);
+  const [activeCalories, setActiveCalories] = useState<number | null>(null);
+  const [latestWeight, setLatestWeight] = useState<number | null>(null);
+
   // Diagnostics state
   const [permissionStatus, setPermissionStatus] = useState<PermissionStatus>('not_determined');
   const [activityCount, setActivityCount] = useState(0);
@@ -70,19 +86,46 @@ export default function HealthScreen() {
       setActivities(acts);
       setLastSync(syncTs);
 
-      // Request HealthKit access on first load (iOS only).
-      // This registers the app in Settings → Health and shows the permission dialog.
+      // Determine Apple Health permission status.
       if (Platform.OS === 'ios') {
-        try {
-          await initAppleHealth();
-        } catch (e) {
-          console.warn('HealthKit init error:', e);
-        }
-        try {
+        const persisted = await getMeta('apple_health_requested');
+        if (persisted === 'true') {
+          setPermissionStatus('granted');
+
+          // Fetch all Apple Health data in parallel
+          try {
+            const [sleep, steps, rhr, hrvData, energy, weight] = await Promise.all([
+              fetchSleepData(7),
+              fetchDailySteps(7),
+              fetchRestingHeartRate(7),
+              fetchHRV(7),
+              fetchActiveEnergy(1),
+              fetchLatestWeight(),
+            ]);
+
+            setSleepSamples(sleep);
+            setDailySteps(steps);
+            setLatestWeight(weight);
+
+            // Latest resting HR
+            if (rhr.length > 0) {
+              setRestingHR(Math.round(rhr[rhr.length - 1].value));
+            }
+            // Latest HRV
+            if (hrvData.length > 0) {
+              setHrv(Math.round(hrvData[hrvData.length - 1].value));
+            }
+            // Today's active calories
+            if (energy.length > 0) {
+              const todayTotal = energy.reduce((sum, e) => sum + e.value, 0);
+              setActiveCalories(Math.round(todayTotal));
+            }
+          } catch {
+            // non-fatal — display whatever we have
+          }
+        } else {
           const status = await getAppleHealthPermission();
           setPermissionStatus(status);
-        } catch {
-          setPermissionStatus('not_determined');
         }
       } else {
         setPermissionStatus('unavailable');
@@ -139,6 +182,7 @@ export default function HealthScreen() {
       const authToken = await getMeta('auth_token');
       if (authToken) {
         await ingestDeviceActivities(30, authToken);
+        await syncHealthVitals(authToken);
       }
       await load();
     } catch {
@@ -153,31 +197,23 @@ export default function HealthScreen() {
     setGranting(true);
     try {
       await initAppleHealth();
+      // initHealthKit succeeded — the permission dialog was shown.
+      // Persist so we know not to show the "Grant Access" button again.
+      await setMeta('apple_health_requested', 'true');
+      setPermissionStatus('granted');
 
-      // Try immediate ingestion after granting
+      // Try immediate ingestion + vitals sync after granting
       try {
         const authToken = await getMeta('auth_token');
         if (authToken) {
           await ingestDeviceActivities(30, authToken);
+          await syncHealthVitals(authToken);
         }
       } catch {
         // ingestion failure is non-fatal
       }
 
       await load();
-
-      // Check if we actually got data — if not, guide user to Settings
-      const status = await getAppleHealthPermission();
-      if (status !== 'granted') {
-        Alert.alert(
-          'Health Access',
-          'iOS only shows the permission dialog once. Go to Settings → Health → Attunedd to enable access.',
-          [
-            { text: 'Open Settings', onPress: () => Linking.openSettings() },
-            { text: 'OK', style: 'cancel' },
-          ],
-        );
-      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       Alert.alert(
@@ -196,10 +232,17 @@ export default function HealthScreen() {
   if (!loaded) return <View style={styles.root} />;
 
   const todayCycle = cycles.length > 0 ? cycles[0] : null;
-  const lastSleep = sleepData.length > 0 ? sleepData[0] : null;
+  const lastWhoopSleep = sleepData.length > 0 ? sleepData[0] : null;
   const hasWhoopData = cycles.length > 0 || sleepData.length > 0;
   const hasActivities = activities.length > 0;
-  const hasAnyData = hasWhoopData || hasActivities;
+  const hasAppleVitals = restingHR !== null || hrv !== null || activeCalories !== null;
+  const hasAppleSleep = sleepSamples.length > 0;
+  const hasAppleSteps = dailySteps.length > 0;
+  const hasAnyData = hasWhoopData || hasActivities || hasAppleVitals || hasAppleSleep || hasAppleSteps;
+
+  // Compute sleep hours from Apple Health sleep samples (last night)
+  const appleSleepHours = computeSleepHours(sleepSamples);
+  const todaySteps = dailySteps.length > 0 ? dailySteps[dailySteps.length - 1]?.value ?? 0 : 0;
 
   const permissionLabel =
     permissionStatus === 'granted' ? 'GRANTED' :
@@ -265,26 +308,86 @@ export default function HealthScreen() {
         </View>
       )}
 
-      {/* Sleep Section */}
-      {lastSleep && (
+      {/* Vitals Section — Apple Health + WHOOP combined */}
+      {(hasAppleVitals || hasAppleSteps || latestWeight !== null) && (
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>TODAY</Text>
+          <View style={styles.metricsRow}>
+            {restingHR !== null && (
+              <View style={styles.metricItem}>
+                <Text style={styles.metricValue}>{restingHR}</Text>
+                <Text style={styles.metricLabel}>RHR</Text>
+              </View>
+            )}
+            {hrv !== null && (
+              <View style={styles.metricItem}>
+                <Text style={styles.metricValue}>{hrv}</Text>
+                <Text style={styles.metricLabel}>HRV</Text>
+              </View>
+            )}
+            {activeCalories !== null && (
+              <View style={styles.metricItem}>
+                <Text style={styles.metricValue}>{activeCalories}</Text>
+                <Text style={styles.metricLabel}>KCAL</Text>
+              </View>
+            )}
+            {todaySteps > 0 && (
+              <View style={styles.metricItem}>
+                <Text style={styles.metricValue}>{formatNumber(todaySteps)}</Text>
+                <Text style={styles.metricLabel}>STEPS</Text>
+              </View>
+            )}
+          </View>
+          {latestWeight !== null && (
+            <View style={[styles.metricsRow, { marginTop: 8 }]}>
+              <View style={styles.metricItem}>
+                <Text style={styles.metricValue}>{latestWeight.toFixed(1)} kg</Text>
+                <Text style={styles.metricLabel}>WEIGHT</Text>
+              </View>
+            </View>
+          )}
+          {/* Step trend — last 7 days */}
+          {dailySteps.length > 1 && (
+            <View style={styles.trendRow}>
+              <Text style={styles.trendLabel}>STEPS — 7 DAYS</Text>
+              <View style={styles.trendValues}>
+                {dailySteps.slice(-7).map((s, i) => (
+                  <Text key={i} style={styles.trendValue}>
+                    {formatNumber(s.value)}
+                  </Text>
+                ))}
+              </View>
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* Sleep Section — Apple Health or WHOOP */}
+      {(hasAppleSleep || lastWhoopSleep) && (
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>SLEEP</Text>
           <View style={styles.metricsRow}>
-            {lastSleep.performance_percentage != null && (
+            {appleSleepHours > 0 && (
               <View style={styles.metricItem}>
-                <Text style={styles.metricValue}>{lastSleep.performance_percentage}%</Text>
+                <Text style={styles.metricValue}>{appleSleepHours.toFixed(1)}h</Text>
+                <Text style={styles.metricLabel}>HOURS</Text>
+              </View>
+            )}
+            {lastWhoopSleep?.performance_percentage != null && (
+              <View style={styles.metricItem}>
+                <Text style={styles.metricValue}>{lastWhoopSleep.performance_percentage}%</Text>
                 <Text style={styles.metricLabel}>PERFORMANCE</Text>
               </View>
             )}
-            {lastSleep.efficiency != null && (
+            {lastWhoopSleep?.efficiency != null && (
               <View style={styles.metricItem}>
-                <Text style={styles.metricValue}>{lastSleep.efficiency}%</Text>
+                <Text style={styles.metricValue}>{lastWhoopSleep.efficiency}%</Text>
                 <Text style={styles.metricLabel}>EFFICIENCY</Text>
               </View>
             )}
-            {lastSleep.total_sleep_hours != null && (
+            {appleSleepHours === 0 && lastWhoopSleep?.total_sleep_hours != null && (
               <View style={styles.metricItem}>
-                <Text style={styles.metricValue}>{lastSleep.total_sleep_hours}h</Text>
+                <Text style={styles.metricValue}>{lastWhoopSleep.total_sleep_hours}h</Text>
                 <Text style={styles.metricLabel}>HOURS</Text>
               </View>
             )}
@@ -292,35 +395,44 @@ export default function HealthScreen() {
         </View>
       )}
 
-      {/* Activities Section */}
+      {/* Activities Section — all workout types */}
       {hasActivities && (
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>ACTIVITIES</Text>
-          {activities.map((a) => (
-            <View key={a.localId} style={styles.activityRow}>
-              <View style={styles.activityLeft}>
-                <Text style={styles.activityDate}>
-                  {formatTimestamp(a.startTime)}
-                </Text>
-                <Text style={styles.activitySource}>
-                  {a.source.toUpperCase()}
-                </Text>
+          {activities.map((a) => {
+            // Parse activity type from raw_json
+            let actType = 'workout';
+            try {
+              const raw = JSON.parse(a.rawJson || '{}');
+              actType = raw.activity_type || raw.activityName || 'workout';
+            } catch { /* ignore */ }
+
+            return (
+              <View key={a.localId} style={styles.activityRow}>
+                <View style={styles.activityLeft}>
+                  <Text style={styles.activityDate}>
+                    {formatTimestamp(a.startTime)}
+                  </Text>
+                  <Text style={styles.activitySource}>
+                    {actType.toUpperCase().replace(/_/g, ' ')}
+                  </Text>
+                </View>
+                <View style={styles.activityMiddle}>
+                  <Text style={styles.activityDuration}>
+                    {Math.round(a.durationMinutes)}m
+                  </Text>
+                  <Text style={styles.activityZone}>
+                    {ZONE_LABELS[a.derivedZone] ?? `Z${a.derivedZone}`}
+                  </Text>
+                </View>
+                <View style={styles.activityRight}>
+                  <Text style={styles.activityAsu}>
+                    {a.computedAsu.toFixed(1)}
+                  </Text>
+                </View>
               </View>
-              <View style={styles.activityMiddle}>
-                <Text style={styles.activityDuration}>
-                  {Math.round(a.durationMinutes)}m
-                </Text>
-                <Text style={styles.activityZone}>
-                  {ZONE_LABELS[a.derivedZone] ?? `Z${a.derivedZone}`}
-                </Text>
-              </View>
-              <View style={styles.activityRight}>
-                <Text style={styles.activityAsu}>
-                  {a.computedAsu.toFixed(1)}
-                </Text>
-              </View>
-            </View>
-          ))}
+            );
+          })}
         </View>
       )}
 
@@ -478,6 +590,35 @@ function formatDate(iso: string): string {
   const hours = String(d.getHours()).padStart(2, '0');
   const minutes = String(d.getMinutes()).padStart(2, '0');
   return `${month}-${day} ${hours}:${minutes}`;
+}
+
+function formatNumber(n: number): string {
+  if (n >= 10000) return `${(n / 1000).toFixed(1)}k`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(Math.round(n));
+}
+
+function computeSleepHours(samples: SleepSample[]): number {
+  // Sum ASLEEP / CORE / DEEP / REM samples from last night
+  let totalMs = 0;
+  const now = Date.now();
+  const yesterday = now - 24 * 60 * 60 * 1000;
+
+  for (const s of samples) {
+    const val = (s.value || '').toUpperCase();
+    // Only count actual sleep (not INBED or AWAKE)
+    if (val === 'INBED' || val === 'AWAKE') continue;
+
+    const start = new Date(s.startDate).getTime();
+    const end = new Date(s.endDate).getTime();
+
+    // Only count samples from the last 24h
+    if (end < yesterday) continue;
+
+    totalMs += end - start;
+  }
+
+  return totalMs / (1000 * 60 * 60);
 }
 
 const styles = StyleSheet.create({

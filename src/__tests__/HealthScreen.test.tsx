@@ -103,13 +103,14 @@ describe('HealthScreen', () => {
         derivedZone: 3,
         computedAsu: 12.5,
         syncedFlag: true,
+        rawJson: JSON.stringify({ activityName: 'Running', activity_type: 'running' }),
       },
     ]);
 
     const { getByText } = render(<HealthScreen />);
     await waitFor(() => {
       expect(getByText('ACTIVITIES')).toBeTruthy();
-      expect(getByText('APPLE_HEALTH')).toBeTruthy();
+      expect(getByText('RUNNING')).toBeTruthy();
       expect(getByText('45m')).toBeTruthy();
     });
   });

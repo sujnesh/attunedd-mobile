@@ -4,6 +4,7 @@ export const EVENT_TYPES = {
   COMPLETE_WORKOUT: 'COMPLETE_WORKOUT',
   OVERRIDE_SESSION: 'OVERRIDE_SESSION',
   INGEST_EXTERNAL_ACTIVITY: 'INGEST_EXTERNAL_ACTIVITY',
+  SYNC_HEALTH_VITALS: 'SYNC_HEALTH_VITALS',
 } as const;
 
 export type EventType = (typeof EVENT_TYPES)[keyof typeof EVENT_TYPES];
@@ -51,12 +52,32 @@ export interface IngestExternalActivityPayload {
   duration_minutes?: number;
 }
 
+export interface SyncHealthVitalsPayload {
+  date: string;
+  resting_hr: number | null;
+  hrv: number | null;
+  active_calories: number | null;
+  steps: number | null;
+  sleep_hours: number | null;
+  weight_kg: number | null;
+  sleep_samples: Array<{
+    start: string;
+    end: string;
+    value: string;
+  }>;
+  step_samples: Array<{
+    date: string;
+    value: number;
+  }>;
+}
+
 export type EventPayload =
   | StartWorkoutPayload
   | LogSetPayload
   | CompleteWorkoutPayload
   | OverrideSessionPayload
-  | IngestExternalActivityPayload;
+  | IngestExternalActivityPayload
+  | SyncHealthVitalsPayload;
 
 export interface SyncEvent {
   id: string;

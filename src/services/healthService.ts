@@ -11,6 +11,7 @@ export interface ActivityRow {
   computedAsu: number;
   syncedFlag: boolean;
   createdAt: string;
+  rawJson: string;
 }
 
 export async function getRecentActivities(limit: number = 50): Promise<ActivityRow[]> {
@@ -33,6 +34,7 @@ export async function getRecentActivities(limit: number = 50): Promise<ActivityR
       computedAsu: row.computed_asu,
       syncedFlag: row.synced_flag === 1,
       createdAt: row.created_at,
+      rawJson: row.raw_json ?? '{}',
     });
   }
 

@@ -5,9 +5,9 @@ import { flushQueue } from '../sync/syncEngine';
 import { normalizeActivity } from './normalizer';
 import { generateActivityHash } from './dedup';
 import { EVENT_TYPES } from '../sync/eventTypes';
-import { setMeta } from '../services/metaStateService';
+import { getMeta, setMeta } from '../services/metaStateService';
 import type { RawActivity } from './types';
-import type { IngestExternalActivityPayload } from '../sync/eventTypes';
+import type { IngestExternalActivityPayload, SyncHealthVitalsPayload } from '../sync/eventTypes';
 
 export async function ingestDeviceActivities(
   userAge: number,
@@ -39,15 +39,24 @@ export async function ingestDeviceActivities(
       const endMs = row.start_time + row.duration_minutes * 60 * 1000;
       const endDate = new Date(endMs);
 
+      // Parse raw_json to get actual activity_type and calories
+      let actType = 'workout';
+      let cal: number | null = null;
+      try {
+        const rawData = JSON.parse(row.raw_json || '{}');
+        actType = rawData.activity_type || rawData.activityName || 'workout';
+        cal = rawData.calories ?? null;
+      } catch { /* ignore */ }
+
       const payload: IngestExternalActivityPayload = {
         source: row.source,
-        activity_type: 'running',
+        activity_type: actType,
         started_at: startDate.toISOString(),
         ended_at: endDate.toISOString(),
         strain: row.computed_asu,
         average_hr: row.avg_hr,
         max_hr: null,
-        calories: null,
+        calories: cal,
         external_id: row.activity_hash,
         external_activity_hash: row.activity_hash,
       };
@@ -108,13 +117,13 @@ export async function ingestDeviceActivities(
 
       const payload: IngestExternalActivityPayload = {
         source: normalized.source,
-        activity_type: 'running',
+        activity_type: raw.activity_type,
         started_at: startDate.toISOString(),
         ended_at: endDate.toISOString(),
         strain: normalized.computed_asu,
         average_hr: normalized.avg_hr,
-        max_hr: null,
-        calories: null,
+        max_hr: raw.max_hr,
+        calories: raw.calories,
         external_id: hash,
         external_activity_hash: hash,
       };
@@ -156,11 +165,99 @@ export async function markActivitySynced(activityHash: string): Promise<void> {
 
 async function fetchPlatformActivities(): Promise<RawActivity[]> {
   if (Platform.OS === 'ios') {
-    const { fetchRecentRuns } = await import('./appleHealth');
-    return fetchRecentRuns();
+    const { fetchAllWorkouts } = await import('./appleHealth');
+    return fetchAllWorkouts(30);
   } else {
     const { fetchRecentRuns } = await import('./healthConnect');
     return fetchRecentRuns();
+  }
+}
+
+/**
+ * Sync health vitals (sleep, steps, HR, HRV, weight) to the backend.
+ * Called after ingestion so the server has data for coaching.
+ */
+export async function syncHealthVitals(authToken: string): Promise<void> {
+  if (Platform.OS !== 'ios') return;
+
+  // Only sync once per day
+  const today = new Date().toISOString().slice(0, 10);
+  const lastSync = await getMeta('last_vitals_sync_date');
+  if (lastSync === today) return;
+
+  try {
+    const {
+      fetchSleepData,
+      fetchDailySteps,
+      fetchRestingHeartRate,
+      fetchHRV,
+      fetchActiveEnergy,
+      fetchLatestWeight,
+    } = await import('./appleHealth');
+
+    const [sleep, steps, rhr, hrvData, energy, weight] = await Promise.all([
+      fetchSleepData(7),
+      fetchDailySteps(7),
+      fetchRestingHeartRate(7),
+      fetchHRV(7),
+      fetchActiveEnergy(1),
+      fetchLatestWeight(),
+    ]);
+
+    const latestRHR = rhr.length > 0 ? Math.round(rhr[rhr.length - 1].value) : null;
+    const latestHRV = hrvData.length > 0 ? Math.round(hrvData[hrvData.length - 1].value) : null;
+    const todayCals = energy.length > 0 ? Math.round(energy.reduce((s, e) => s + e.value, 0)) : null;
+    const todaySteps = steps.length > 0 ? steps[steps.length - 1]?.value ?? null : null;
+
+    // Compute sleep hours from last night
+    let sleepHours: number | null = null;
+    const now = Date.now();
+    const yesterday = now - 24 * 60 * 60 * 1000;
+    let totalMs = 0;
+    for (const s of sleep) {
+      const val = (s.value || '').toUpperCase();
+      if (val === 'INBED' || val === 'AWAKE') continue;
+      const end = new Date(s.endDate).getTime();
+      if (end < yesterday) continue;
+      totalMs += end - new Date(s.startDate).getTime();
+    }
+    if (totalMs > 0) sleepHours = totalMs / (1000 * 60 * 60);
+
+    const payload: SyncHealthVitalsPayload = {
+      date: today,
+      resting_hr: latestRHR,
+      hrv: latestHRV,
+      active_calories: todayCals,
+      steps: todaySteps,
+      sleep_hours: sleepHours,
+      weight_kg: weight,
+      sleep_samples: sleep.map(s => ({
+        start: s.startDate,
+        end: s.endDate,
+        value: s.value,
+      })),
+      step_samples: steps.map(s => ({
+        date: s.startDate,
+        value: s.value,
+      })),
+    };
+
+    const deviceId = await getDeviceId();
+    const appVersion = await getAppVersion();
+
+    await enqueueEvent({
+      id: generateUUID(),
+      type: EVENT_TYPES.SYNC_HEALTH_VITALS,
+      created_at: Date.now(),
+      payload,
+      device_id: deviceId,
+      app_version: appVersion,
+    });
+
+    await flushQueue(authToken);
+    await setMeta('last_vitals_sync_date', today);
+  } catch {
+    // non-fatal — will retry next time
   }
 }
 

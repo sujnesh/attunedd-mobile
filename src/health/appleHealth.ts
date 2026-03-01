@@ -1,50 +1,54 @@
-import AppleHealthKit, {
-  type HealthInputOptions,
-  type HealthValue,
-} from 'react-native-health';
+import { NativeModules, Platform } from 'react-native';
 import type { RawActivity } from './types';
 
+const RNHealth: any = NativeModules.AppleHealthKit;
+
+// Request broad permissions so we can read everything useful
 const PERMISSIONS = {
   permissions: {
     read: [
-      AppleHealthKit.Constants.Permissions.Workout,
-      AppleHealthKit.Constants.Permissions.HeartRate,
-      AppleHealthKit.Constants.Permissions.DistanceWalkingRunning,
+      'Workout',
+      'HeartRate',
+      'RestingHeartRate',
+      'HeartRateVariability',
+      'StepCount',
+      'DistanceWalkingRunning',
+      'DistanceCycling',
+      'DistanceSwimming',
+      'ActiveEnergyBurned',
+      'BasalEnergyBurned',
+      'SleepAnalysis',
+      'Weight',
+      'BodyFatPercentage',
+      'Vo2Max',
+      'OxygenSaturation',
+      'FlightsClimbed',
+      'AppleExerciseTime',
     ],
-    write: [],
+    write: [] as string[],
   },
 };
+
+function assertNativeModule(): void {
+  if (!RNHealth) {
+    const available = Object.keys(NativeModules).join(', ');
+    throw new Error(
+      `AppleHealthKit native module not found. Available: [${available}].`,
+    );
+  }
+}
 
 export type PermissionStatus = 'granted' | 'denied' | 'not_determined' | 'unavailable';
 
 export async function getPermissionStatus(): Promise<PermissionStatus> {
+  if (Platform.OS !== 'ios' || !RNHealth) return 'unavailable';
   try {
     const isAvailable = await new Promise<boolean>((resolve) => {
-      AppleHealthKit.isAvailable((err: Object, available: boolean) => {
+      RNHealth.isAvailable((err: any, available: boolean) => {
         resolve(!err && available);
       });
     });
     if (!isAvailable) return 'unavailable';
-
-    const authStatus = await new Promise<number>((resolve) => {
-      AppleHealthKit.getAuthStatus(
-        { permissions: PERMISSIONS.permissions },
-        (err: Object, result: { permissions: { read: number[] } }) => {
-          if (err || !result?.permissions?.read) {
-            resolve(0);
-            return;
-          }
-          // HealthKit auth statuses: 0=not_determined, 1=denied, 2=authorized
-          const statuses = result.permissions.read;
-          if (statuses.every((s: number) => s === 2)) resolve(2);
-          else if (statuses.some((s: number) => s === 1)) resolve(1);
-          else resolve(0);
-        },
-      );
-    });
-
-    if (authStatus === 2) return 'granted';
-    if (authStatus === 1) return 'denied';
     return 'not_determined';
   } catch {
     return 'not_determined';
@@ -52,9 +56,10 @@ export async function getPermissionStatus(): Promise<PermissionStatus> {
 }
 
 export async function initAppleHealth(): Promise<boolean> {
+  assertNativeModule();
   return new Promise((resolve, reject) => {
     try {
-      AppleHealthKit.initHealthKit(PERMISSIONS, (err: Object) => {
+      RNHealth.initHealthKit(PERMISSIONS, (err: any) => {
         if (err) {
           reject(new Error(`HealthKit init failed: ${JSON.stringify(err)}`));
           return;
@@ -67,68 +72,249 @@ export async function initAppleHealth(): Promise<boolean> {
   });
 }
 
-export async function fetchRecentRuns(
-  lookbackDays: number = 7
+// ---------------------------------------------------------------------------
+// Workouts — fetch ALL types (running, strength, cycling, swimming, yoga, etc.)
+// ---------------------------------------------------------------------------
+
+interface AnchoredWorkout {
+  activityId: number;
+  activityName: string;
+  calories: number;
+  distance: number; // miles
+  start: string;
+  end: string;
+  duration: number; // seconds
+  id: string;
+  tracked: boolean;
+  sourceName: string;
+  device: string;
+}
+
+export async function fetchAllWorkouts(
+  lookbackDays: number = 30,
 ): Promise<RawActivity[]> {
+  if (!RNHealth) return [];
+
   const startDate = new Date(
-    Date.now() - lookbackDays * 24 * 60 * 60 * 1000
+    Date.now() - lookbackDays * 24 * 60 * 60 * 1000,
   ).toISOString();
 
-  const options: HealthInputOptions = {
-    startDate,
-  };
+  const result = await new Promise<{ data: AnchoredWorkout[]; anchor: string }>(
+    (resolve, reject) => {
+      RNHealth.getAnchoredWorkouts(
+        { startDate },
+        (err: any, res: any) => {
+          if (err) {
+            reject(new Error(typeof err === 'string' ? err : JSON.stringify(err)));
+            return;
+          }
+          resolve(res);
+        },
+      );
+    },
+  );
 
-  const samples = await getSamples(options);
+  const workouts = result.data || [];
   const activities: RawActivity[] = [];
 
-  for (const sample of samples) {
-    const startMs = new Date((sample as any).start ?? sample.startDate).getTime();
-    const endMs = new Date((sample as any).end ?? sample.endDate).getTime();
-    const durationMinutes = (endMs - startMs) / 60000;
+  for (const w of workouts) {
+    const startMs = new Date(w.start).getTime();
+    const endMs = new Date(w.end).getTime();
+    const durationMinutes = w.duration > 0 ? w.duration / 60 : (endMs - startMs) / 60000;
 
     if (durationMinutes <= 0) continue;
 
-    const avgHr = await getAverageHeartRate(
-      (sample as any).start ?? sample.startDate,
-      (sample as any).end ?? sample.endDate
-    );
+    // Get average HR for this workout's time window
+    const avgHr = await getAverageHeartRate(w.start, w.end);
 
     activities.push({
       source: 'apple',
       start_time: startMs,
       duration_minutes: durationMinutes,
-      distance_m: (sample as any).distance ? (sample as any).distance * 1000 : null,
+      distance_m: w.distance > 0 ? w.distance * 1609.34 : null, // miles → meters
       avg_hr: avgHr,
       max_hr: null,
-      calories: (sample as any).calories ?? null,
-      activity_type: 'running',
-      raw_json: JSON.stringify(sample),
+      calories: w.calories > 0 ? w.calories : null,
+      activity_type: mapActivityType(w.activityName),
+      raw_json: JSON.stringify(w),
     });
   }
 
   return activities;
 }
 
-function getSamples(
-  options: HealthInputOptions
-): Promise<HealthValue[]> {
-  return new Promise((resolve, reject) => {
-    AppleHealthKit.getSamples(options, (err: string, results: HealthValue[]) => {
-      if (err) {
-        reject(new Error(err));
-        return;
-      }
-      resolve(results || []);
-    });
+// ---------------------------------------------------------------------------
+// Sleep
+// ---------------------------------------------------------------------------
+
+export interface SleepSample {
+  startDate: string;
+  endDate: string;
+  value: string; // 'INBED', 'ASLEEP', 'AWAKE', 'CORE', 'DEEP', 'REM'
+}
+
+export async function fetchSleepData(
+  lookbackDays: number = 7,
+): Promise<SleepSample[]> {
+  if (!RNHealth) return [];
+  const startDate = new Date(
+    Date.now() - lookbackDays * 24 * 60 * 60 * 1000,
+  ).toISOString();
+
+  return new Promise((resolve) => {
+    RNHealth.getSleepSamples(
+      { startDate },
+      (err: any, results: SleepSample[]) => {
+        if (err || !results) {
+          resolve([]);
+          return;
+        }
+        resolve(results);
+      },
+    );
   });
 }
 
+// ---------------------------------------------------------------------------
+// Daily steps
+// ---------------------------------------------------------------------------
+
+export interface StepSample {
+  startDate: string;
+  endDate: string;
+  value: number;
+}
+
+export async function fetchDailySteps(
+  lookbackDays: number = 7,
+): Promise<StepSample[]> {
+  if (!RNHealth) return [];
+  const startDate = new Date(
+    Date.now() - lookbackDays * 24 * 60 * 60 * 1000,
+  ).toISOString();
+
+  return new Promise((resolve) => {
+    RNHealth.getDailyStepCountSamples(
+      { startDate },
+      (err: any, results: StepSample[]) => {
+        if (err || !results) {
+          resolve([]);
+          return;
+        }
+        resolve(results);
+      },
+    );
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Resting heart rate
+// ---------------------------------------------------------------------------
+
+export async function fetchRestingHeartRate(
+  lookbackDays: number = 7,
+): Promise<Array<{ startDate: string; value: number }>> {
+  if (!RNHealth) return [];
+  const startDate = new Date(
+    Date.now() - lookbackDays * 24 * 60 * 60 * 1000,
+  ).toISOString();
+
+  return new Promise((resolve) => {
+    RNHealth.getRestingHeartRateSamples(
+      { startDate },
+      (err: any, results: Array<{ startDate: string; value: number }>) => {
+        if (err || !results) {
+          resolve([]);
+          return;
+        }
+        resolve(results);
+      },
+    );
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Heart rate variability (SDNN)
+// ---------------------------------------------------------------------------
+
+export async function fetchHRV(
+  lookbackDays: number = 7,
+): Promise<Array<{ startDate: string; value: number }>> {
+  if (!RNHealth) return [];
+  const startDate = new Date(
+    Date.now() - lookbackDays * 24 * 60 * 60 * 1000,
+  ).toISOString();
+
+  return new Promise((resolve) => {
+    RNHealth.getHeartRateVariabilitySamples(
+      { startDate },
+      (err: any, results: Array<{ startDate: string; value: number }>) => {
+        if (err || !results) {
+          resolve([]);
+          return;
+        }
+        resolve(results);
+      },
+    );
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Active energy burned (daily)
+// ---------------------------------------------------------------------------
+
+export async function fetchActiveEnergy(
+  lookbackDays: number = 7,
+): Promise<Array<{ startDate: string; endDate: string; value: number }>> {
+  if (!RNHealth) return [];
+  const startDate = new Date(
+    Date.now() - lookbackDays * 24 * 60 * 60 * 1000,
+  ).toISOString();
+
+  return new Promise((resolve) => {
+    RNHealth.getActiveEnergyBurned(
+      { startDate },
+      (err: any, results: Array<{ startDate: string; endDate: string; value: number }>) => {
+        if (err || !results) {
+          resolve([]);
+          return;
+        }
+        resolve(results);
+      },
+    );
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Latest weight
+// ---------------------------------------------------------------------------
+
+export async function fetchLatestWeight(): Promise<number | null> {
+  if (!RNHealth) return null;
+  return new Promise((resolve) => {
+    RNHealth.getLatestWeight(
+      { unit: 'kg' },
+      (err: any, result: { value: number }) => {
+        if (err || !result) {
+          resolve(null);
+          return;
+        }
+        resolve(result.value ?? null);
+      },
+    );
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
 function getAverageHeartRate(
   startDate: string,
-  endDate: string
+  endDate: string,
 ): Promise<number | null> {
   return new Promise((resolve) => {
-    AppleHealthKit.getHeartRateSamples(
+    RNHealth.getHeartRateSamples(
       { startDate, endDate },
       (err: string, results: Array<{ value: number }>) => {
         if (err || !results || results.length === 0) {
@@ -136,8 +322,35 @@ function getAverageHeartRate(
           return;
         }
         const sum = results.reduce((acc, r) => acc + r.value, 0);
-        resolve(sum / results.length);
-      }
+        resolve(Math.round(sum / results.length));
+      },
     );
   });
+}
+
+// Map HealthKit activity names to simpler categories
+function mapActivityType(activityName: string): string {
+  const name = activityName.toLowerCase();
+  if (name.includes('running') || name.includes('jogging')) return 'running';
+  if (name.includes('walking') || name.includes('hiking')) return 'walking';
+  if (name.includes('cycling') || name.includes('biking')) return 'cycling';
+  if (name.includes('swimming')) return 'swimming';
+  if (name.includes('yoga') || name.includes('pilates')) return 'yoga';
+  if (name.includes('strength') || name.includes('weight') || name.includes('functional')) return 'strength';
+  if (name.includes('cross') || name.includes('hiit') || name.includes('high intensity')) return 'hiit';
+  if (name.includes('rowing') || name.includes('elliptical') || name.includes('stair')) return 'cardio';
+  if (name.includes('dance') || name.includes('aerobics')) return 'cardio';
+  if (name.includes('basketball') || name.includes('soccer') || name.includes('tennis') || name.includes('football') || name.includes('rugby')) return 'sport';
+  if (name.includes('boxing') || name.includes('martial') || name.includes('kickboxing')) return 'combat';
+  if (name.includes('flexibility') || name.includes('stretching') || name.includes('cooldown')) return 'flexibility';
+  if (name.includes('core')) return 'core';
+  if (name.includes('mind') || name.includes('meditation')) return 'mindfulness';
+  return activityName.toLowerCase().replace(/\s+/g, '_');
+}
+
+// Keep for backwards compat — ingestion engine calls this
+export async function fetchRecentRuns(
+  lookbackDays: number = 30,
+): Promise<RawActivity[]> {
+  return fetchAllWorkouts(lookbackDays);
 }
