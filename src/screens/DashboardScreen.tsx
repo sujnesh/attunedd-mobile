@@ -15,7 +15,8 @@ import {
   type LimitRow,
 } from '../services/explanationEngine';
 import { apiCached } from '../services/apiClient';
-import type { ProjectionDay, HeavySessionSimulation, ProjectionsResponse } from '../types/api';
+import { deriveCaps } from '../state/evaluationEngine';
+import type { CoachingTodayResponse, ProjectionDay, HeavySessionSimulation, ProjectionsResponse } from '../types/api';
 
 const BAND_COLORS: Record<string, string> = {
   green: '#2ECC71',
@@ -52,6 +53,32 @@ function formatTimestamp(ts: number | null): string {
   return `${d.getFullYear()}-${month}-${day}  ${hours}:${minutes}`;
 }
 
+function mapServerToReadinessState(server: CoachingTodayResponse): ReadinessState {
+  const score = Math.round(server.adaptation_score * 100);
+  const band = server.risk_band;
+  const policyCaps = server.policy_caps as Record<string, number | boolean>;
+  const caps: ParsedCaps = {
+    maxRpe: (policyCaps.max_rpe as number) ?? deriveCaps(band).max_rpe,
+    maxStressPct: (policyCaps.max_allowed_stress_pct as number) ?? deriveCaps(band).max_allowed_stress_pct,
+    blockHeavyNeural: (policyCaps.block_heavy_neural as boolean) ?? deriveCaps(band).block_heavy_neural,
+    maxCardioZone: (policyCaps.max_cardio_zone as number) ?? deriveCaps(band).max_cardio_zone,
+  };
+
+  return {
+    data: {
+      score,
+      band,
+      caps,
+      timestamp: Date.now(),
+      penalties: server.penalties,
+      rawMetrics: server.raw_metrics,
+      source: 'server',
+      coaching: server.coaching,
+    },
+    isStale: false,
+  };
+}
+
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
   const [state, setState] = useState<ReadinessState | null>(null);
@@ -59,19 +86,36 @@ export default function DashboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [projections, setProjections] = useState<ProjectionDay[]>([]);
   const [heavySim, setHeavySim] = useState<HeavySessionSimulation | null>(null);
+  const [isWelcome, setIsWelcome] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
-      loadLatestEvaluation()
-        .then((s) => {
-          setState(s);
-          setLoaded(true);
-        })
-        .catch(() => setLoaded(true));
-
+      loadDashboard();
       fetchProjections();
     }, [])
   );
+
+  const loadDashboard = useCallback(async () => {
+    try {
+      // Try server first
+      const serverData = await apiCached<CoachingTodayResponse>('/api/coaching/today', 'cache_coaching_today');
+      const mapped = mapServerToReadinessState(serverData);
+      setState(mapped);
+      // Welcome state: server returned data but no penalties (new user)
+      setIsWelcome(serverData.penalties.length === 0);
+      setLoaded(true);
+    } catch {
+      // Fall back to local evaluation
+      try {
+        const local = await loadLatestEvaluation();
+        setState(local);
+        setIsWelcome(false);
+        setLoaded(true);
+      } catch {
+        setLoaded(true);
+      }
+    }
+  }, []);
 
   const fetchProjections = useCallback(async () => {
     try {
@@ -89,6 +133,7 @@ export default function DashboardScreen() {
     try {
       const freshData = await triggerManualEvaluation();
       setState({ data: freshData, isStale: false });
+      setIsWelcome(false);
     } catch {
       // refresh failure is non-fatal
     } finally {
@@ -103,7 +148,18 @@ export default function DashboardScreen() {
   if (!data || data.score == null || !data.band || !data.caps) {
     return (
       <View style={[styles.root, { paddingTop: insets.top }]}>
-        <Text style={styles.pending}>Evaluation pending...</Text>
+        <Text style={styles.welcomeTitle}>ATTUNEDD</Text>
+        <Text style={styles.welcomeMessage}>
+          Complete your first workout to see your readiness score and coaching insights
+        </Text>
+        <Pressable
+          onPress={handleRefresh}
+          style={styles.refreshButton}
+          disabled={refreshing}>
+          <Text style={[styles.refreshText, refreshing && styles.refreshing]}>
+            {refreshing ? 'REFRESHING' : 'REFRESH'}
+          </Text>
+        </Pressable>
       </View>
     );
   }
@@ -134,6 +190,12 @@ export default function DashboardScreen() {
       <Text style={[styles.bandLabel, { color: accent }]}>{bandLabel}</Text>
       <Text style={styles.decisionLine}>{headline}</Text>
 
+      {isWelcome && (
+        <Text style={styles.welcomeHint}>
+          Complete your first workout to see detailed coaching insights
+        </Text>
+      )}
+
       {coaching?.nudges && coaching.nudges.length > 0 ? (
         <NudgesSection nudges={coaching.nudges} />
       ) : null}
@@ -142,13 +204,13 @@ export default function DashboardScreen() {
         <PositiveNotesSection notes={coaching.positive_notes} />
       ) : null}
 
-      {explanation.hasServerData ? (
+      {!isWelcome && explanation.hasServerData ? (
         <WhyTodaySection explanation={explanation} score={data.score} />
-      ) : data.source === 'local' ? (
+      ) : !isWelcome && data.source === 'local' ? (
         <Text style={styles.syncHint}>Full analysis available after sync</Text>
       ) : null}
 
-      <SessionLimitsSection limits={explanation.sessionLimits} />
+      {!isWelcome && <SessionLimitsSection limits={explanation.sessionLimits} />}
 
       {projections.length > 0 && (
         <ProjectionsSection projections={projections} heavySim={heavySim} />
@@ -312,6 +374,31 @@ const styles = StyleSheet.create({
     backgroundColor: '#0A0A0A',
     alignItems: 'center',
     paddingHorizontal: 32,
+  },
+  welcomeTitle: {
+    color: '#EAEAEA',
+    fontSize: 16,
+    fontWeight: '600',
+    letterSpacing: 6,
+    marginTop: 160,
+    marginBottom: 24,
+    fontFamily: MONO,
+  },
+  welcomeMessage: {
+    color: '#888888',
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 22,
+    paddingHorizontal: 24,
+    marginBottom: 32,
+  },
+  welcomeHint: {
+    color: '#555555',
+    fontSize: 12,
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 24,
+    paddingHorizontal: 16,
   },
   pending: {
     color: '#888888',

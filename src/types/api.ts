@@ -71,6 +71,15 @@ export interface DebriefData {
   summary_line: string;
 }
 
+export interface CoachingTodayResponse {
+  adaptation_score: number;
+  risk_band: string;
+  coaching: CoachingData;
+  policy_caps: Record<string, unknown>;
+  penalties: PenaltyItem[];
+  raw_metrics: Record<string, unknown>;
+}
+
 export interface ProjectionDay {
   date: string;
   session_type: string;
