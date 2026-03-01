@@ -40,6 +40,8 @@
 	</dict>
 	<key>NSHealthShareUsageDescription</key>
 	<string>Attunedd reads your workout and heart rate data to track training stress and recovery.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Attunedd saves your completed workouts to Apple Health.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string></string>
 	<key>RCTNewArchEnabled</key>
