@@ -13,7 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { api, apiCached } from '../services/apiClient';
-import { setMeta } from '../services/metaStateService';
+import { getMeta, setMeta } from '../services/metaStateService';
 import { logout } from '../navigation/AppNavigator';
 
 const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
@@ -137,30 +137,68 @@ export default function SettingsScreen() {
   // Training history editing state
   const [editHistory, setEditHistory] = useState('');
 
-  const populateEditState = useCallback((p: ProfileData) => {
-    const d = p.demographics;
-    setEditAge(d?.age != null ? String(d.age) : '');
-    setEditGender(d?.gender ?? '');
-    setEditHeightCm(d?.height_cm != null ? String(d.height_cm) : '');
-    setEditWeightKg(d?.weight_kg != null ? String(d.weight_kg) : '');
+  const populateFromLocal = useCallback(async () => {
+    // Read demographics from local meta_state (server profile may not return them)
+    const [demoJson, liftsJson, history] = await Promise.all([
+      getMeta('user_demographics_json'),
+      getMeta('user_lifts_json'),
+      getMeta('user_training_history'),
+    ]);
 
-    const lifts = p.preferences?.current_lifts;
-    setEditBench(lifts?.bench != null ? String(lifts.bench) : '');
-    setEditSquat(lifts?.squat != null ? String(lifts.squat) : '');
-    setEditDeadlift(lifts?.deadlift != null ? String(lifts.deadlift) : '');
-    setEditLiftUnit(lifts?.unit ?? 'kg');
+    if (demoJson) {
+      try {
+        const d = JSON.parse(demoJson) as Demographics;
+        setEditAge(d.age != null ? String(d.age) : '');
+        setEditGender(d.gender ?? '');
+        setEditHeightCm(d.height_cm != null ? String(d.height_cm) : '');
+        setEditWeightKg(d.weight_kg != null ? String(d.weight_kg) : '');
+      } catch { /* ignore parse error */ }
+    }
 
-    setEditHistory(p.preferences?.training_history ?? '');
+    if (liftsJson) {
+      try {
+        const l = JSON.parse(liftsJson) as CurrentLifts;
+        setEditBench(l.bench != null ? String(l.bench) : '');
+        setEditSquat(l.squat != null ? String(l.squat) : '');
+        setEditDeadlift(l.deadlift != null ? String(l.deadlift) : '');
+        setEditLiftUnit(l.unit ?? 'kg');
+      } catch { /* ignore parse error */ }
+    }
+
+    if (history) {
+      setEditHistory(history);
+    }
   }, []);
 
   const fetchProfile = useCallback(() => {
     apiCached<ProfileData>('/api/profile', 'cache_profile')
       .then((p) => {
         setProfile(p);
-        populateEditState(p);
+        // Server profile has preferences — also try to populate demographics/lifts
+        // from server if available, otherwise local meta_state handles it
+        if (p.demographics) {
+          const d = p.demographics;
+          setEditAge(d.age != null ? String(d.age) : '');
+          setEditGender(d.gender ?? '');
+          setEditHeightCm(d.height_cm != null ? String(d.height_cm) : '');
+          setEditWeightKg(d.weight_kg != null ? String(d.weight_kg) : '');
+        }
+        if (p.preferences?.current_lifts) {
+          const l = p.preferences.current_lifts;
+          setEditBench(l.bench != null ? String(l.bench) : '');
+          setEditSquat(l.squat != null ? String(l.squat) : '');
+          setEditDeadlift(l.deadlift != null ? String(l.deadlift) : '');
+          setEditLiftUnit(l.unit ?? 'kg');
+        }
+        if (p.preferences?.training_history) {
+          setEditHistory(p.preferences.training_history);
+        }
       })
       .catch(() => {});
-  }, [populateEditState]);
+
+    // Also load from local storage (covers demographics the server doesn't return)
+    populateFromLocal();
+  }, [populateFromLocal]);
 
   useFocusEffect(
     useCallback(() => {
@@ -297,19 +335,25 @@ export default function SettingsScreen() {
         body: { preferences: prefPayload, demographics },
       });
 
-      // Bust all caches so dashboard/train screens pick up changes
+      // Persist locally so we can read them back (server profile may not return these)
       await Promise.all([
+        setMeta('user_demographics_json', JSON.stringify(demographics)),
+        prefPayload.current_lifts
+          ? setMeta('user_lifts_json', JSON.stringify(prefPayload.current_lifts))
+          : Promise.resolve(),
+        historyVal
+          ? setMeta('user_training_history', historyVal)
+          : setMeta('user_training_history', ''),
+        // Bust caches so dashboard/train screens pick up changes
         setMeta('cache_profile', ''),
         setMeta('cache_plans_current', ''),
         setMeta('cache_coaching_today', ''),
       ]).catch(() => {});
 
-      // Fetch fresh profile (bypasses cache)
+      // Fetch fresh profile
       const fresh = await api<ProfileData>('/api/profile');
-      // Also update the cache with fresh data
       await setMeta('cache_profile', JSON.stringify(fresh)).catch(() => {});
       setProfile(fresh);
-      populateEditState(fresh);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to update settings';
       Alert.alert('Error', msg);

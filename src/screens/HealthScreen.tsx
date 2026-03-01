@@ -70,8 +70,14 @@ export default function HealthScreen() {
       setActivities(acts);
       setLastSync(syncTs);
 
-      // Load permission status
+      // Request HealthKit access on first load (iOS only).
+      // This registers the app in Settings → Health and shows the permission dialog.
       if (Platform.OS === 'ios') {
+        try {
+          await initAppleHealth();
+        } catch (e) {
+          console.warn('HealthKit init error:', e);
+        }
         try {
           const status = await getAppleHealthPermission();
           setPermissionStatus(status);
@@ -173,9 +179,10 @@ export default function HealthScreen() {
         );
       }
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
       Alert.alert(
         'Health Access',
-        'Could not request permissions. Go to Settings → Health → Attunedd to enable access.',
+        `${msg}\n\nTry going to Settings → Health → Attunedd to enable access manually.`,
         [
           { text: 'Open Settings', onPress: () => Linking.openSettings() },
           { text: 'OK', style: 'cancel' },

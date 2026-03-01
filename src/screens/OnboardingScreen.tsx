@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api, ApiError } from '../services/apiClient';
+import { setMeta } from '../services/metaStateService';
 import { completeOnboarding } from '../navigation/AppNavigator';
 
 const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
@@ -175,6 +176,16 @@ export default function OnboardingScreen() {
         method: 'POST',
         body,
       });
+
+      // Persist demographics & lifts locally so Settings can read them
+      await Promise.all([
+        setMeta('user_demographics_json', JSON.stringify(body.demographics)),
+        body.preferences && (body.preferences as Record<string, unknown>).current_lifts
+          ? setMeta('user_lifts_json', JSON.stringify((body.preferences as Record<string, unknown>).current_lifts))
+          : Promise.resolve(),
+        trainingHistory ? setMeta('user_training_history', trainingHistory) : Promise.resolve(),
+      ]).catch(() => {});
+
       await completeOnboarding();
     } catch (err) {
       if (err instanceof ApiError) {

@@ -52,10 +52,18 @@ export async function getPermissionStatus(): Promise<PermissionStatus> {
 }
 
 export async function initAppleHealth(): Promise<boolean> {
-  return new Promise((resolve) => {
-    AppleHealthKit.initHealthKit(PERMISSIONS, (err) => {
-      resolve(!err);
-    });
+  return new Promise((resolve, reject) => {
+    try {
+      AppleHealthKit.initHealthKit(PERMISSIONS, (err: Object) => {
+        if (err) {
+          reject(new Error(`HealthKit init failed: ${JSON.stringify(err)}`));
+          return;
+        }
+        resolve(true);
+      });
+    } catch (e) {
+      reject(e);
+    }
   });
 }
 

@@ -11,6 +11,11 @@ jest.mock('../navigation/AppNavigator', () => ({
   logout: jest.fn(),
 }));
 
+jest.mock('../services/metaStateService', () => ({
+  getMeta: jest.fn().mockResolvedValue(null),
+  setMeta: jest.fn().mockResolvedValue(undefined),
+}));
+
 const { api, apiCached } = require('../services/apiClient');
 
 const PROFILE = {
