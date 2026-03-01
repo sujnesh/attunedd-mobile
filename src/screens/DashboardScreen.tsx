@@ -10,6 +10,7 @@ import {
   type ReadinessState,
 } from '../services/readinessService';
 import type { ParsedCaps } from '../services/metaStateService';
+import { getMeta } from '../services/metaStateService';
 import {
   buildExplanation,
   type ExplanationOutput,
@@ -20,6 +21,14 @@ import { apiCached } from '../services/apiClient';
 import { deriveCaps } from '../state/evaluationEngine';
 import { executeSql } from '../db/database';
 import InfoChip from '../components/InfoChip';
+import DailyCheckIn from '../components/DailyCheckIn';
+import {
+  saveCheckIn,
+  getLastCheckIn,
+  shouldShowCheckIn,
+  getCheckInContext,
+  type CheckInData,
+} from '../services/checkInService';
 import type { RootTabParamList } from '../navigation/types';
 import type {
   CoachingTodayResponse,
@@ -46,31 +55,22 @@ const BAND_COLORS: Record<string, string> = {
   high_risk: '#E74C3C',
 };
 
-const TONE_COLORS: Record<string, string> = {
-  encouraging: '#2ECC71',
-  cautionary: '#F1C40F',
-  protective: '#E74C3C',
-  neutral: '#888888',
-};
-
 const BAND_LABELS: Record<string, string> = {
-  green: 'OPTIMAL',
-  yellow: 'SUBOPTIMAL',
-  red: 'HIGH RISK',
-  optimal: 'OPTIMAL',
-  suboptimal: 'SUBOPTIMAL',
-  high_risk: 'HIGH RISK',
+  green: 'READY',
+  yellow: 'CAUTION',
+  red: 'REST',
+  optimal: 'READY',
+  suboptimal: 'CAUTION',
+  high_risk: 'REST',
 };
 
-function formatTimestamp(ts: number | null): string {
-  if (ts == null || ts <= 0) return '—';
-  const d = new Date(ts);
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  const hours = String(d.getHours()).padStart(2, '0');
-  const minutes = String(d.getMinutes()).padStart(2, '0');
-  return `${d.getFullYear()}-${month}-${day}  ${hours}:${minutes}`;
-}
+const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
+
+const MODE_COLORS: Record<string, string> = {
+  push: '#2ECC71',
+  maintain: '#888888',
+  fatigue_management: '#F1C40F',
+};
 
 function mapServerToReadinessState(server: CoachingTodayResponse): ReadinessState {
   const score = Math.round(server.adaptation_score);
@@ -98,6 +98,110 @@ function mapServerToReadinessState(server: CoachingTodayResponse): ReadinessStat
   };
 }
 
+function buildHeadline(
+  coaching: CoachingTodayResponse['coaching'] | null | undefined,
+  explanation: ExplanationOutput,
+  penalties: { category: string; reason: string; points: number }[],
+  rawMetrics: Record<string, unknown>,
+  checkIn?: CheckInData | null,
+): string {
+  // Check-in signals take priority over generic "no penalties" messages
+  if (checkIn && penalties.length === 0) {
+    if (checkIn.energy <= 2) return 'Low energy noted. Adjust intensity today.';
+    if (checkIn.sleepQuality <= 2) return 'Poor sleep reported. Recovery priority.';
+    if (checkIn.soreness >= 4) return 'High soreness noted. Consider lighter load.';
+  }
+
+  // Use server coaching headline if available and not generic fluff
+  if (coaching?.headline) {
+    const lower = coaching.headline.toLowerCase();
+    // Filter out generic motivational lines
+    if (!lower.includes('push hard') && !lower.includes('fully recovered')) {
+      return coaching.headline;
+    }
+  }
+
+  // Build from penalties — reference actual cause
+  if (penalties.length > 0) {
+    const top = penalties.sort((a, b) => b.points - a.points)[0];
+    if (top.category === 'recovery_window') return 'Recovery window active.';
+    if (top.category === 'systemic_fatigue') {
+      const ratio = rawMetrics.rolling_strain_ratio;
+      if (typeof ratio === 'number') return `Systemic fatigue elevated ${Math.round((ratio - 1) * 100)}%.`;
+      return 'Systemic fatigue elevated.';
+    }
+    if (top.category === 'load_management') {
+      const ratio = rawMetrics.rolling_strain_ratio;
+      if (typeof ratio === 'number') return `Load ratio ${ratio.toFixed(2)}x baseline.`;
+      return 'Training load elevated.';
+    }
+    if (top.category === 'override_behavior') return 'Recent overrides affecting recovery.';
+    return top.reason;
+  }
+
+  // No penalties — clean state
+  return 'No recovery penalties active.';
+}
+
+function buildWhyBullets(
+  penalties: { category: string; reason: string; points: number; metric_key: string }[],
+  rawMetrics: Record<string, unknown>,
+): string[] {
+  const bullets: string[] = [];
+
+  if (penalties.length === 0) {
+    // Positive state — show what's clear
+    const capacity = rawMetrics.capacity_score;
+    if (typeof capacity === 'number') {
+      bullets.push(`Recovery capacity ${Math.round(capacity * 100)}%`);
+    }
+    const ratio = rawMetrics.rolling_strain_ratio;
+    if (typeof ratio === 'number') {
+      bullets.push(`Load ratio ${ratio.toFixed(2)}x baseline`);
+    }
+    bullets.push('Recovery window cleared');
+    bullets.push('Neural fatigue inactive');
+    return bullets;
+  }
+
+  // Penalty-based bullets
+  for (const p of penalties.sort((a, b) => b.points - a.points).slice(0, 4)) {
+    if (p.category === 'recovery_window') {
+      bullets.push(`Recovery window active (-${p.points})`);
+    } else if (p.category === 'systemic_fatigue') {
+      const ratio = rawMetrics.rolling_strain_ratio;
+      if (typeof ratio === 'number') {
+        bullets.push(`Strain ratio ${ratio.toFixed(2)}x baseline (-${p.points})`);
+      } else {
+        bullets.push(`Systemic fatigue detected (-${p.points})`);
+      }
+    } else if (p.category === 'load_management') {
+      const ratio = rawMetrics.rolling_strain_ratio;
+      if (typeof ratio === 'number') {
+        bullets.push(`Load elevated ${ratio.toFixed(2)}x (-${p.points})`);
+      } else {
+        bullets.push(`Load management penalty (-${p.points})`);
+      }
+    } else if (p.category === 'override_behavior') {
+      const count = rawMetrics.overrides_14d ?? rawMetrics.overrides_7d;
+      if (typeof count === 'number') {
+        bullets.push(`${count} recent overrides (-${p.points})`);
+      } else {
+        bullets.push(`Override pattern detected (-${p.points})`);
+      }
+    } else {
+      bullets.push(`${p.reason} (-${p.points})`);
+    }
+  }
+
+  const capacity = rawMetrics.capacity_score;
+  if (typeof capacity === 'number' && !bullets.some((b) => b.includes('capacity'))) {
+    bullets.push(`Recovery capacity ${Math.round(capacity * 100)}%`);
+  }
+
+  return bullets;
+}
+
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<BottomTabNavigationProp<RootTabParamList>>();
@@ -106,25 +210,21 @@ export default function DashboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [projections, setProjections] = useState<ProjectionDay[]>([]);
   const [heavySim, setHeavySim] = useState<HeavySessionSimulation | null>(null);
-  const [isWelcome, setIsWelcome] = useState(false);
   const [todayPlan, setTodayPlan] = useState<PlanDayData | null>(null);
   const [recentWorkouts, setRecentWorkouts] = useState<RecentWorkout[]>([]);
+  const [showCheckIn, setShowCheckIn] = useState(false);
+  const [checkInState, setCheckInState] = useState<CheckInData | null>(null);
 
   const loadDashboard = useCallback(async () => {
     try {
-      // Try server first
       const serverData = await apiCached<CoachingTodayResponse>('/api/coaching/today', 'cache_coaching_today');
       const mapped = mapServerToReadinessState(serverData);
       setState(mapped);
-      // Welcome state: server returned data but no penalties (new user)
-      setIsWelcome(serverData.penalties.length === 0);
       setLoaded(true);
     } catch {
-      // Fall back to local evaluation
       try {
         const local = await loadLatestEvaluation();
         setState(local);
-        setIsWelcome(false);
         setLoaded(true);
       } catch {
         setLoaded(true);
@@ -138,7 +238,7 @@ export default function DashboardScreen() {
       setProjections(body.projections);
       setHeavySim(body.heavy_session_simulation);
     } catch {
-      // projection fetch failure is non-fatal
+      // non-fatal
     }
   }, []);
 
@@ -148,7 +248,7 @@ export default function DashboardScreen() {
       const today = body.week?.find((d) => d.today);
       setTodayPlan(today ?? null);
     } catch {
-      // plan fetch failure is non-fatal
+      // non-fatal
     }
   }, []);
 
@@ -174,14 +274,40 @@ export default function DashboardScreen() {
     }
   }, []);
 
+  const checkDailyCheckIn = useCallback(async () => {
+    try {
+      const lastDate = await getMeta('last_checkin_date');
+      if (shouldShowCheckIn(lastDate)) {
+        setShowCheckIn(true);
+      } else {
+        const existing = await getLastCheckIn();
+        setCheckInState(existing);
+      }
+    } catch {
+      // non-fatal
+    }
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       loadDashboard();
       fetchProjections();
       fetchTodayPlan();
       fetchRecentWorkouts();
-    }, [loadDashboard, fetchProjections, fetchTodayPlan, fetchRecentWorkouts])
+      checkDailyCheckIn();
+    }, [loadDashboard, fetchProjections, fetchTodayPlan, fetchRecentWorkouts, checkDailyCheckIn])
   );
+
+  const handleCheckInSubmit = useCallback(async (data: CheckInData) => {
+    await saveCheckIn(data);
+    setCheckInState(data);
+    setShowCheckIn(false);
+    loadDashboard();
+  }, [loadDashboard]);
+
+  const handleCheckInSkip = useCallback(() => {
+    setShowCheckIn(false);
+  }, []);
 
   const handleRefresh = useCallback(async () => {
     if (refreshing) return;
@@ -189,9 +315,8 @@ export default function DashboardScreen() {
     try {
       const freshData = await triggerManualEvaluation();
       setState({ data: freshData, isStale: false });
-      setIsWelcome(false);
     } catch {
-      // refresh failure is non-fatal
+      // non-fatal
     } finally {
       setRefreshing(false);
     }
@@ -206,7 +331,7 @@ export default function DashboardScreen() {
       <View style={[styles.root, { paddingTop: insets.top }]}>
         <Text style={styles.welcomeTitle}>ATTUNEDD</Text>
         <Text style={styles.welcomeMessage}>
-          Complete your first workout to see your readiness score and coaching insights
+          Complete your first workout to see your readiness score and coaching.
         </Text>
         <Pressable
           onPress={handleRefresh}
@@ -220,10 +345,7 @@ export default function DashboardScreen() {
     );
   }
 
-  const coaching = data.coaching;
-  const accent = coaching?.tone
-    ? (TONE_COLORS[coaching.tone] ?? BAND_COLORS[data.band] ?? '#888888')
-    : (BAND_COLORS[data.band] ?? '#888888');
+  const accent = BAND_COLORS[data.band] ?? '#888888';
   const bandLabel = BAND_LABELS[data.band] ?? data.band.toUpperCase();
 
   const explanation = buildExplanation({
@@ -234,74 +356,64 @@ export default function DashboardScreen() {
     caps: data.caps,
   });
 
-  // Use server coaching headline when available, fall back to local explanation
-  const headline = coaching?.headline ?? explanation.decisionLine;
+  const headline = buildHeadline(data.coaching, explanation, data.penalties, data.rawMetrics, checkInState);
+  const whyBullets = buildWhyBullets(data.penalties, data.rawMetrics);
+  const checkInBullets = checkInState ? getCheckInContext(checkInState) : [];
 
   return (
+    <>
+    <DailyCheckIn
+      visible={showCheckIn}
+      onSubmit={handleCheckInSubmit}
+      onSkip={handleCheckInSkip}
+    />
     <ScrollView
       style={styles.scrollRoot}
-      contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 32 }]}
+      contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 48, paddingBottom: insets.bottom + 40 }]}
     >
-      {/* Coach Section — the primary AI-driven experience */}
-      <Text style={styles.coachLabel}>YOUR COACH</Text>
+      {/* Primary focal point: Score + Band + Headline */}
       <InfoChip topic="adaptation_score" color={accent}>
         <Text style={[styles.score, { color: accent }]}>{data.score}</Text>
       </InfoChip>
-      <Text style={styles.scoreExplainer}>
-        READINESS SCORE
-      </Text>
-      <Text style={styles.scoreDetail}>
-        {data.score >= 80
-          ? 'You\'re well recovered. Push hard today.'
-          : data.score >= 60
-          ? 'Moderate recovery. Train smart, respect the caps.'
-          : data.score >= 40
-          ? 'Under-recovered. Keep it light or rest.'
-          : 'Significantly fatigued. Rest recommended.'}
-      </Text>
-      <View style={styles.bandRow}>
-        <InfoChip topic="risk_band" color={accent}>
-          <Text style={[styles.bandLabel, { color: accent }]}>{bandLabel}</Text>
-        </InfoChip>
-      </View>
-      <Text style={styles.decisionLine}>{headline}</Text>
-      <Text style={styles.coachAttribution}>
-        AI analysis based on your training history, recovery data, and goals
-      </Text>
+      <InfoChip topic="risk_band" color={accent}>
+        <Text style={[styles.bandLabel, { color: accent }]}>{bandLabel}</Text>
+      </InfoChip>
+      <Text style={styles.headline}>{headline}</Text>
 
-      {/* Score breakdown hint */}
-      <Text style={styles.scoreBreakdownHint}>
-        Score = 100 minus recovery penalties. Tap the score to learn more.
-      </Text>
-
-      {isWelcome && (
-        <Text style={styles.welcomeHint}>
-          Complete your first workout to see detailed coaching insights
-        </Text>
+      {/* WHY section — only if data available */}
+      {(whyBullets.length > 0 || checkInBullets.length > 0) && (
+        <View style={styles.whySection}>
+          <Text style={styles.whySectionLabel}>WHY</Text>
+          {whyBullets.map((bullet, i) => (
+            <Text key={`p-${i}`} style={styles.whyBullet}>{'\u2022'} {bullet}</Text>
+          ))}
+          {checkInBullets.map((bullet, i) => (
+            <Text key={`c-${i}`} style={styles.whyBulletCheckIn}>{'\u2022'} {bullet}</Text>
+          ))}
+        </View>
       )}
 
-      {/* Coaching insights — nudges and positive notes prominently */}
-      {coaching?.positive_notes && coaching.positive_notes.length > 0 ? (
-        <PositiveNotesSection notes={coaching.positive_notes} />
-      ) : null}
-
-      {coaching?.nudges && coaching.nudges.length > 0 ? (
-        <View style={styles.coachingInsights}>
-          <Text style={styles.insightsHeader}>COACH INSIGHTS</Text>
-          {coaching.nudges.map((nudge, i) => (
+      {/* Coaching nudges — specific insights only */}
+      {data.coaching?.nudges && data.coaching.nudges.length > 0 && (
+        <View style={styles.insightsSection}>
+          <Text style={styles.sectionLabel}>INSIGHTS</Text>
+          {data.coaching.nudges.map((nudge, i) => (
             <Text key={i} style={styles.insightText}>{nudge}</Text>
           ))}
         </View>
-      ) : null}
+      )}
 
+      {/* Today's prescription */}
       {todayPlan && (
         <TodayPlanCard
           day={todayPlan}
+          caps={data.caps}
           onStartWorkout={() => navigation.navigate('Train', { screen: 'TrainHome' })}
           onViewPlan={() => navigation.navigate('Train', { screen: 'PlanDetail' })}
         />
       )}
 
+      {/* Recent workouts */}
       {recentWorkouts.length > 0 && (
         <RecentWorkoutsSection
           workouts={recentWorkouts}
@@ -309,19 +421,15 @@ export default function DashboardScreen() {
         />
       )}
 
-      {!isWelcome && explanation.hasServerData ? (
-        <WhyTodaySection explanation={explanation} score={data.score} />
-      ) : !isWelcome && data.source === 'local' ? (
-        <Text style={styles.syncHint}>Full analysis available after sync</Text>
-      ) : null}
+      {/* Session limits */}
+      {explanation.sessionLimits.some((l) => l.restricted) && (
+        <SessionLimitsSection limits={explanation.sessionLimits} />
+      )}
 
-      {!isWelcome && <SessionLimitsSection limits={explanation.sessionLimits} />}
-
+      {/* Projections */}
       {projections.length > 0 && (
         <ProjectionsSection projections={projections} heavySim={heavySim} />
       )}
-
-      <Text style={styles.timestamp}>{formatTimestamp(data.timestamp)}</Text>
 
       <Pressable
         onPress={handleRefresh}
@@ -332,84 +440,39 @@ export default function DashboardScreen() {
         </Text>
       </Pressable>
     </ScrollView>
-  );
-}
-
-function PositiveNotesSection({ notes }: { notes: string[] }) {
-  return (
-    <View style={styles.positiveContainer}>
-      {notes.map((note, i) => (
-        <Text key={i} style={styles.positiveText}>{note}</Text>
-      ))}
-    </View>
-  );
-}
-
-function WhyTodaySection({ explanation, score }: { explanation: ExplanationOutput; score: number }) {
-  return (
-    <View style={styles.section}>
-      <Text style={styles.sectionHeader}>WHY THIS SCORE</Text>
-      {explanation.penaltyBreakdown.map((row, i) => (
-        <PenaltyRowView key={i} row={row} />
-      ))}
-      <Text style={styles.totalLine}>
-        (total: -{explanation.totalDeducted} from 100)
-      </Text>
-    </View>
-  );
-}
-
-function PenaltyRowView({ row }: { row: PenaltyRow }) {
-  return (
-    <View style={styles.penaltyRow}>
-      <View style={styles.penaltyHeader}>
-        <Text style={styles.penaltyIcon}>{row.icon}</Text>
-        <Text style={styles.penaltyCategory}>{row.category}</Text>
-        <Text style={styles.penaltyPoints}>-{row.points}</Text>
-      </View>
-      <Text style={styles.penaltyDescription}>{row.description}</Text>
-    </View>
-  );
-}
-
-function SessionLimitsSection({ limits }: { limits: LimitRow[] }) {
-  return (
-    <View style={styles.section}>
-      <Text style={styles.sectionHeader}>SESSION LIMITS</Text>
-      {limits.map((limit, i) => (
-        <View key={i} style={styles.capsRow}>
-          <Text style={styles.capsLabel}>{limit.label}</Text>
-          <Text style={[styles.capsValue, limit.restricted && styles.capsRestricted]}>
-            {limit.value}
-          </Text>
-        </View>
-      ))}
-    </View>
+    </>
   );
 }
 
 function TodayPlanCard({
   day,
+  caps,
   onStartWorkout,
   onViewPlan,
 }: {
   day: PlanDayData;
+  caps: ParsedCaps;
   onStartWorkout: () => void;
   onViewPlan: () => void;
 }) {
   const sessionLabel = day.session_type.replace(/_/g, ' ').toUpperCase();
   const mainBlock = day.blocks.find((b) => b.name === 'Main');
   const mainExercises = mainBlock?.exercises?.filter((e) => e.sets) ?? [];
+  const primaryMuscles = mainExercises
+    .map((e) => e.name)
+    .slice(0, 3)
+    .join(', ');
 
   if (day.rest_day) {
     return (
       <Pressable style={styles.todayCard} onPress={onViewPlan}>
-        <Text style={styles.todayHeader}>AI-GENERATED PLAN</Text>
-        <Text style={styles.todaySessionType}>REST DAY</Text>
+        <Text style={styles.todayLabel}>TODAY</Text>
+        <Text style={styles.todayType}>Rest Day</Text>
         {day.rationale ? (
-          <Text style={styles.todayRationale}>{day.rationale}</Text>
-        ) : null}
-        <Text style={styles.viewPlanHint}>TAP FOR FULL PLAN</Text>
+          <Text style={styles.todayContext}>{day.rationale}</Text>
+        ) : (
+          <Text style={styles.todayContext}>Recovery priority scheduled.</Text>
+        )}
       </Pressable>
     );
   }
@@ -417,29 +480,34 @@ function TodayPlanCard({
   if (day.workout_status === 'completed') {
     return (
       <Pressable style={styles.todayCard} onPress={onViewPlan}>
-        <Text style={styles.todayHeader}>AI-GENERATED PLAN</Text>
-        <Text style={styles.todaySessionType}>{sessionLabel}</Text>
-        <Text style={styles.todayCompleted}>COMPLETED</Text>
-        <Text style={styles.viewPlanHint}>TAP FOR FULL PLAN</Text>
+        <Text style={styles.todayLabel}>TODAY</Text>
+        <Text style={styles.todayType}>{sessionLabel}</Text>
+        <Text style={styles.todayCompleted}>Completed</Text>
       </Pressable>
     );
   }
 
+  // Derive coaching mode from rationale or caps
+  const coachingMode = caps.maxStressPct < 85
+    ? 'Fatigue Mgmt'
+    : caps.blockHeavyNeural
+    ? 'Recovery'
+    : 'Maintain';
+
   return (
     <Pressable style={styles.todayCard} onPress={onViewPlan}>
-      <Text style={styles.todayHeader}>AI-GENERATED PLAN</Text>
-      <Text style={styles.todaySessionType}>{sessionLabel}</Text>
+      <Text style={styles.todayLabel}>TODAY</Text>
+      <Text style={styles.todayType}>
+        {sessionLabel} {'\u2014'} {coachingMode}
+      </Text>
       {day.rationale ? (
-        <Text style={styles.todayRationaleProminent}>{day.rationale}</Text>
+        <Text style={styles.todayRationale}>{day.rationale}</Text>
       ) : null}
-      {mainExercises.slice(0, 4).map((ex, i) => (
-        <Text key={i} style={styles.todayExercise}>
-          {ex.name}
-          {ex.sets && ex.rep_range ? `  ${ex.sets}\u00D7${ex.rep_range}` : ''}
-        </Text>
-      ))}
-      {mainExercises.length > 4 && (
-        <Text style={styles.todayMore}>+{mainExercises.length - 4} more</Text>
+      {primaryMuscles ? (
+        <Text style={styles.todayMuscles}>Primary: {primaryMuscles}</Text>
+      ) : null}
+      {caps.maxStressPct < 100 && (
+        <Text style={styles.todayCap}>Intensity cap: {caps.maxStressPct}%</Text>
       )}
       <Pressable
         onPress={onStartWorkout}
@@ -447,9 +515,8 @@ function TodayPlanCard({
           styles.startBtn,
           pressed && styles.startBtnPressed,
         ]}>
-        <Text style={styles.startBtnText}>START WORKOUT</Text>
+        <Text style={styles.startBtnText}>Start Session</Text>
       </Pressable>
-      <Text style={styles.viewPlanHint}>TAP CARD FOR FULL PLAN DETAILS</Text>
     </Pressable>
   );
 }
@@ -464,18 +531,18 @@ function RecentWorkoutsSection({
   return (
     <View style={styles.section}>
       <Pressable onPress={onViewAll} style={styles.recentHeader}>
-        <Text style={styles.sectionHeader}>RECENT WORKOUTS</Text>
-        <Text style={styles.viewAllText}>VIEW ALL</Text>
+        <Text style={styles.sectionLabel}>RECENT</Text>
+        <Text style={styles.viewAllText}>View All</Text>
       </Pressable>
       {workouts.map((w, i) => {
         const d = new Date(w.completedAt);
         const dateStr = `${d.getMonth() + 1}/${d.getDate()}`;
-        const modeLabel = (w.mode ?? 'workout').replace(/_/g, ' ').toUpperCase();
+        const modeLabel = (w.mode ?? 'workout').replace(/_/g, ' ');
         return (
           <View key={i} style={styles.recentRow}>
             <Text style={styles.recentDate}>{dateStr}</Text>
             <Text style={styles.recentMode}>{modeLabel}</Text>
-            <Text style={styles.recentStress}>{w.stress} stress</Text>
+            <Text style={styles.recentStress}>{w.stress}</Text>
           </View>
         );
       })}
@@ -483,21 +550,27 @@ function RecentWorkoutsSection({
   );
 }
 
-const MODE_COLORS: Record<string, string> = {
-  push: '#2ECC71',
-  maintain: '#888888',
-  fatigue_management: '#F1C40F',
-};
+function SessionLimitsSection({ limits }: { limits: LimitRow[] }) {
+  const restricted = limits.filter((l) => l.restricted);
+  if (restricted.length === 0) return null;
+
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionLabel}>SESSION LIMITS</Text>
+      {restricted.map((limit, i) => (
+        <View key={i} style={styles.capsRow}>
+          <Text style={styles.capsLabel}>{limit.label}</Text>
+          <Text style={styles.capsValueRestricted}>{limit.value}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
 
 function formatProjectionDate(iso: string): string {
   const d = new Date(iso + 'T00:00:00');
   const days = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
-  const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-  return `${days[d.getDay()]} ${months[d.getMonth()]} ${d.getDate()}`;
-}
-
-function formatSessionType(type: string): string {
-  return type.replace(/_/g, ' ').toUpperCase();
+  return days[d.getDay()];
 }
 
 function ProjectionsSection({
@@ -509,46 +582,42 @@ function ProjectionsSection({
 }) {
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionHeader}>NEXT 2 DAYS</Text>
-      {projections.map((p) => (
-        <View key={p.date} style={styles.projectionDay}>
-          <View style={styles.projectionHeader}>
-            <Text style={styles.projectionDate}>{formatProjectionDate(p.date)}</Text>
-            <Text style={[styles.projectionMode, { color: MODE_COLORS[p.coaching_mode] ?? '#888888' }]}>
-              {p.coaching_mode.replace(/_/g, ' ').toUpperCase()}
-            </Text>
+      <Text style={styles.sectionLabel}>NEXT 2 DAYS</Text>
+      {projections.map((p) => {
+        const sessionType = p.session_type.replace(/_/g, ' ').toUpperCase();
+        const mode = p.coaching_mode.replace(/_/g, ' ');
+        const modeColor = MODE_COLORS[p.coaching_mode] ?? '#888888';
+
+        // Dynamic metric per day
+        let metric: string | null = null;
+        if (p.rest_reason) {
+          metric = p.rest_reason;
+        } else if (p.primary_muscles.length > 0) {
+          metric = p.primary_muscles.map((m) => m.replace(/_/g, ' ')).join(', ');
+        }
+
+        return (
+          <View key={p.date} style={styles.projectionDay}>
+            <View style={styles.projectionHeader}>
+              <Text style={styles.projectionDate}>
+                {formatProjectionDate(p.date)} {'\u2014'} {sessionType}
+              </Text>
+              <Text style={[styles.projectionMode, { color: modeColor }]}>
+                {mode}
+              </Text>
+            </View>
+            {metric && (
+              <Text style={styles.projectionMetric}>{metric}</Text>
+            )}
           </View>
-          <Text style={styles.projectionType}>
-            {formatSessionType(p.session_type)}
-          </Text>
-          {p.rest_reason ? (
-            <Text style={styles.projectionRest}>{p.rest_reason}</Text>
-          ) : p.primary_muscles.length > 0 ? (
-            <Text style={styles.projectionMuscles}>
-              {p.primary_muscles.map((m) => m.replace(/_/g, ' ')).join(', ')}
-            </Text>
-          ) : null}
-        </View>
-      ))}
-      {heavySim && (
-        <View style={styles.simBlock}>
-          <Text style={styles.simLabel}>HEAVY SESSION IMPACT</Text>
-          <View style={styles.simRow}>
-            <Text style={styles.simMetric}>STRAIN RATIO</Text>
-            <Text style={styles.simValue}>
-              {heavySim.current_strain_ratio} → {heavySim.projected_strain_ratio}
-            </Text>
-          </View>
-          {heavySim.warning && (
-            <Text style={styles.simWarning}>{heavySim.warning}</Text>
-          )}
-        </View>
+        );
+      })}
+      {heavySim && heavySim.warning && (
+        <Text style={styles.simWarning}>{heavySim.warning}</Text>
       )}
     </View>
   );
 }
-
-const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
 
 const styles = StyleSheet.create({
   scrollRoot: {
@@ -582,176 +651,180 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     marginBottom: 32,
   },
-  welcomeHint: {
-    color: '#555555',
-    fontSize: 12,
-    textAlign: 'center',
-    lineHeight: 18,
-    marginBottom: 24,
-    paddingHorizontal: 16,
-  },
-  pending: {
-    color: '#888888',
-    fontSize: 16,
-    textAlign: 'center',
-    marginTop: 200,
-    fontFamily: MONO,
-  },
+  // Primary focal point
   score: {
-    fontSize: 64,
+    fontSize: 72,
     fontWeight: '200',
     fontFamily: MONO,
     letterSpacing: 2,
-    marginBottom: 4,
+    marginBottom: 8,
   },
   bandLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    letterSpacing: 4,
-    marginBottom: 12,
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 6,
+    marginBottom: 20,
   },
-  decisionLine: {
+  headline: {
     color: '#CCCCCC',
-    fontSize: 14,
+    fontSize: 15,
     textAlign: 'center',
-    lineHeight: 20,
+    lineHeight: 22,
     marginBottom: 32,
-    paddingHorizontal: 16,
-  },
-  coachLabel: {
-    color: '#555555',
-    fontSize: 10,
-    fontWeight: '600',
-    letterSpacing: 3,
-    marginBottom: 12,
-    fontFamily: MONO,
-  },
-  scoreExplainer: {
-    color: '#555555',
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 3,
-    marginTop: 4,
-    marginBottom: 8,
-    fontFamily: MONO,
-  },
-  scoreDetail: {
-    color: '#888888',
-    fontSize: 13,
-    textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: 8,
-    paddingHorizontal: 16,
-  },
-  scoreBreakdownHint: {
-    color: '#333333',
-    fontSize: 10,
-    textAlign: 'center',
-    marginBottom: 24,
-  },
-  coachAttribution: {
-    color: '#444444',
-    fontSize: 11,
-    textAlign: 'center',
-    marginBottom: 8,
-    fontStyle: 'italic',
-  },
-  coachingInsights: {
-    width: '100%',
-    borderWidth: 0.5,
-    borderColor: '#222244',
-    backgroundColor: '#0A0A14',
-    padding: 16,
-    marginBottom: 24,
-  },
-  insightsHeader: {
-    color: '#6666AA',
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 3,
-    marginBottom: 10,
-    fontFamily: MONO,
-  },
-  insightText: {
-    color: '#9999CC',
-    fontSize: 12,
-    lineHeight: 18,
-    marginBottom: 6,
-    paddingLeft: 8,
-  },
-  positiveContainer: {
-    width: '100%',
-    marginBottom: 16,
     paddingHorizontal: 8,
   },
-  positiveText: {
-    color: '#2ECC71',
-    fontSize: 12,
-    lineHeight: 18,
-    marginBottom: 6,
-    paddingLeft: 12,
+  // WHY section
+  whySection: {
+    width: '100%',
+    marginBottom: 32,
   },
-  syncHint: {
+  whySectionLabel: {
     color: '#555555',
-    fontSize: 12,
-    fontFamily: MONO,
-    textAlign: 'center',
-    marginBottom: 24,
-    letterSpacing: 1,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 3,
+    marginBottom: 12,
   },
+  whyBullet: {
+    color: '#888888',
+    fontSize: 13,
+    lineHeight: 22,
+    paddingLeft: 4,
+  },
+  whyBulletCheckIn: {
+    color: '#F1C40F',
+    fontSize: 13,
+    lineHeight: 22,
+    paddingLeft: 4,
+  },
+  // Insights
+  insightsSection: {
+    width: '100%',
+    marginBottom: 32,
+  },
+  insightText: {
+    color: '#999999',
+    fontSize: 13,
+    lineHeight: 20,
+    marginBottom: 6,
+    paddingLeft: 4,
+  },
+  // Sections
   section: {
     width: '100%',
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#222222',
-    paddingTop: 20,
-    marginBottom: 8,
+    borderTopColor: '#1A1A1A',
+    paddingTop: 24,
+    marginBottom: 16,
   },
-  sectionHeader: {
+  sectionLabel: {
     color: '#555555',
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: '700',
     letterSpacing: 3,
     marginBottom: 16,
   },
-  penaltyRow: {
-    marginBottom: 16,
+  // Today's plan
+  todayCard: {
+    width: '100%',
+    paddingVertical: 20,
+    paddingHorizontal: 4,
+    marginBottom: 32,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#1A1A1A',
   },
-  penaltyHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  penaltyIcon: {
-    color: '#888888',
-    fontSize: 14,
-    width: 20,
-  },
-  penaltyCategory: {
-    color: '#EAEAEA',
-    fontSize: 13,
-    fontWeight: '500',
-    flex: 1,
-  },
-  penaltyPoints: {
-    color: '#E74C3C',
-    fontSize: 13,
-    fontWeight: '600',
-    fontFamily: MONO,
-  },
-  penaltyDescription: {
-    color: '#888888',
-    fontSize: 12,
-    marginLeft: 20,
-    lineHeight: 16,
-  },
-  totalLine: {
+  todayLabel: {
     color: '#555555',
     fontSize: 11,
-    fontFamily: MONO,
-    textAlign: 'center',
-    marginTop: 8,
+    fontWeight: '700',
+    letterSpacing: 3,
+    marginBottom: 10,
+  },
+  todayType: {
+    color: '#EAEAEA',
+    fontSize: 20,
+    fontWeight: '600',
+    letterSpacing: 1,
+    marginBottom: 10,
+  },
+  todayContext: {
+    color: '#888888',
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  todayRationale: {
+    color: '#999999',
+    fontSize: 13,
+    lineHeight: 20,
     marginBottom: 8,
   },
+  todayMuscles: {
+    color: '#888888',
+    fontSize: 12,
+    marginBottom: 6,
+  },
+  todayCap: {
+    color: '#F1C40F',
+    fontSize: 12,
+    fontFamily: MONO,
+    marginBottom: 8,
+  },
+  todayCompleted: {
+    color: '#2ECC71',
+    fontSize: 13,
+    fontWeight: '600',
+    letterSpacing: 1,
+  },
+  startBtn: {
+    marginTop: 16,
+    paddingVertical: 14,
+    alignItems: 'center',
+    backgroundColor: '#2ECC71',
+  },
+  startBtnPressed: {
+    backgroundColor: '#27AE60',
+  },
+  startBtnText: {
+    color: '#0A0A0A',
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 1,
+  },
+  // Recent workouts
+  recentHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  viewAllText: {
+    color: '#555555',
+    fontSize: 11,
+    letterSpacing: 1,
+  },
+  recentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    gap: 12,
+  },
+  recentDate: {
+    color: '#888888',
+    fontSize: 12,
+    fontFamily: MONO,
+    width: 40,
+  },
+  recentMode: {
+    color: '#CCCCCC',
+    fontSize: 13,
+    flex: 1,
+  },
+  recentStress: {
+    color: '#888888',
+    fontSize: 12,
+    fontFamily: MONO,
+  },
+  // Session limits
   capsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -760,27 +833,47 @@ const styles = StyleSheet.create({
   capsLabel: {
     color: '#888888',
     fontSize: 12,
-    fontWeight: '500',
     letterSpacing: 2,
   },
-  capsValue: {
-    color: '#EAEAEA',
+  capsValueRestricted: {
+    color: '#F1C40F',
     fontSize: 14,
     fontWeight: '500',
     fontFamily: MONO,
   },
-  capsRestricted: {
-    color: '#F1C40F',
+  // Projections
+  projectionDay: {
+    marginBottom: 20,
   },
-  timestamp: {
-    color: '#888888',
+  projectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  projectionDate: {
+    color: '#EAEAEA',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  projectionMode: {
     fontSize: 11,
-    fontFamily: MONO,
-    marginTop: 32,
+    fontWeight: '500',
     letterSpacing: 1,
   },
+  projectionMetric: {
+    color: '#666666',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  simWarning: {
+    color: '#F1C40F',
+    fontSize: 12,
+    marginTop: 8,
+  },
+  // Refresh
   refreshButton: {
-    marginTop: 24,
+    marginTop: 32,
     paddingVertical: 8,
     paddingHorizontal: 24,
   },
@@ -793,196 +886,5 @@ const styles = StyleSheet.create({
   },
   refreshing: {
     color: '#333333',
-  },
-  projectionDay: {
-    marginBottom: 16,
-  },
-  projectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  projectionDate: {
-    color: '#EAEAEA',
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 2,
-  },
-  projectionMode: {
-    fontSize: 10,
-    fontWeight: '600',
-    letterSpacing: 1,
-  },
-  projectionType: {
-    color: '#CCCCCC',
-    fontSize: 13,
-    fontFamily: MONO,
-    marginBottom: 2,
-  },
-  projectionRest: {
-    color: '#888888',
-    fontSize: 11,
-    lineHeight: 16,
-  },
-  projectionMuscles: {
-    color: '#555555',
-    fontSize: 11,
-    letterSpacing: 1,
-  },
-  simBlock: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#222222',
-    paddingTop: 12,
-    marginTop: 4,
-  },
-  simLabel: {
-    color: '#555555',
-    fontSize: 10,
-    fontWeight: '600',
-    letterSpacing: 2,
-    marginBottom: 8,
-  },
-  simRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 4,
-  },
-  simMetric: {
-    color: '#888888',
-    fontSize: 11,
-    fontWeight: '500',
-    letterSpacing: 1,
-  },
-  simValue: {
-    color: '#EAEAEA',
-    fontSize: 12,
-    fontFamily: MONO,
-  },
-  simWarning: {
-    color: '#F1C40F',
-    fontSize: 11,
-    marginTop: 6,
-  },
-  recentHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  viewAllText: {
-    color: '#555555',
-    fontSize: 10,
-    fontWeight: '600',
-    letterSpacing: 1,
-  },
-  recentRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    gap: 12,
-  },
-  recentDate: {
-    color: '#888888',
-    fontSize: 11,
-    fontFamily: MONO,
-    width: 40,
-  },
-  recentMode: {
-    color: '#CCCCCC',
-    fontSize: 12,
-    flex: 1,
-  },
-  recentStress: {
-    color: '#888888',
-    fontSize: 11,
-    fontFamily: MONO,
-  },
-  bandRow: {
-    marginBottom: 12,
-  },
-  todayCard: {
-    width: '100%',
-    borderWidth: 0.5,
-    borderColor: '#222222',
-    padding: 16,
-    marginBottom: 24,
-  },
-  todayHeader: {
-    color: '#555555',
-    fontSize: 10,
-    fontWeight: '600',
-    letterSpacing: 3,
-    marginBottom: 8,
-    fontFamily: MONO,
-  },
-  todaySessionType: {
-    color: '#EAEAEA',
-    fontSize: 18,
-    fontWeight: '700',
-    letterSpacing: 2,
-    marginBottom: 8,
-  },
-  todayRationale: {
-    color: '#888888',
-    fontSize: 13,
-    lineHeight: 20,
-    marginBottom: 12,
-  },
-  todayRationaleProminent: {
-    color: '#CCCCCC',
-    fontSize: 14,
-    lineHeight: 22,
-    marginBottom: 12,
-    fontStyle: 'italic',
-    borderLeftWidth: 2,
-    borderLeftColor: '#2ECC71',
-    paddingLeft: 12,
-  },
-  todayExercise: {
-    color: '#CCCCCC',
-    fontSize: 12,
-    fontFamily: MONO,
-    paddingVertical: 4,
-  },
-  todayMore: {
-    color: '#555555',
-    fontSize: 11,
-    fontFamily: MONO,
-    marginTop: 4,
-    marginBottom: 8,
-  },
-  todayCompleted: {
-    color: '#2ECC71',
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 2,
-    fontFamily: MONO,
-  },
-  startBtn: {
-    marginTop: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#2ECC71',
-  },
-  startBtnPressed: {
-    backgroundColor: '#0D1A0D',
-  },
-  startBtnText: {
-    color: '#2ECC71',
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 2,
-    fontFamily: MONO,
-  },
-  viewPlanHint: {
-    color: '#444444',
-    fontSize: 10,
-    fontWeight: '600',
-    letterSpacing: 2,
-    fontFamily: MONO,
-    textAlign: 'center',
-    marginTop: 12,
   },
 });
