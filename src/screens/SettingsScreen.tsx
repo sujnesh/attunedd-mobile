@@ -228,7 +228,21 @@ export default function SettingsScreen() {
     ]);
   };
 
-  const saveAll = async (overrides?: { prefKey?: string; prefValue?: string }) => {
+  interface SaveOverrides {
+    prefKey?: string;
+    prefValue?: string;
+    gender?: string;
+    age?: string;
+    heightCm?: string;
+    weightKg?: string;
+    history?: string;
+    bench?: string;
+    squat?: string;
+    deadlift?: string;
+    liftUnit?: 'kg' | 'lb';
+  }
+
+  const saveAll = async (overrides?: SaveOverrides) => {
     if (!profile?.preferences || saving) return;
     setSaving(true);
     setEditingKey(null);
@@ -243,28 +257,37 @@ export default function SettingsScreen() {
         ? parseInt(v, 10) : v;
     }
 
-    // Build current lifts
-    const b = parseFloat(editBench);
-    const s = parseFloat(editSquat);
-    const d = parseFloat(editDeadlift);
+    // Use overrides if provided, otherwise fall back to current state
+    const benchVal = overrides?.bench ?? editBench;
+    const squatVal = overrides?.squat ?? editSquat;
+    const deadliftVal = overrides?.deadlift ?? editDeadlift;
+    const liftUnitVal = overrides?.liftUnit ?? editLiftUnit;
+    const b = parseFloat(benchVal);
+    const s = parseFloat(squatVal);
+    const d = parseFloat(deadliftVal);
     if (b || s || d) {
       prefPayload.current_lifts = {
         bench: b || undefined,
         squat: s || undefined,
         deadlift: d || undefined,
-        unit: editLiftUnit,
+        unit: liftUnitVal,
       };
     }
 
-    prefPayload.training_history = editHistory || undefined;
+    const historyVal = overrides?.history ?? editHistory;
+    prefPayload.training_history = historyVal || undefined;
 
     const demographics: Record<string, unknown> = {};
-    const ageNum = parseInt(editAge, 10);
+    const ageVal = overrides?.age ?? editAge;
+    const ageNum = parseInt(ageVal, 10);
     if (!isNaN(ageNum) && ageNum > 0) demographics.age = ageNum;
-    if (editGender) demographics.gender = editGender;
-    const hNum = parseInt(editHeightCm, 10);
+    const genderVal = overrides?.gender ?? editGender;
+    if (genderVal) demographics.gender = genderVal;
+    const heightVal = overrides?.heightCm ?? editHeightCm;
+    const hNum = parseInt(heightVal, 10);
     if (!isNaN(hNum) && hNum > 0) demographics.height_cm = hNum;
-    const wNum = parseFloat(editWeightKg);
+    const weightVal = overrides?.weightKg ?? editWeightKg;
+    const wNum = parseFloat(weightVal);
     if (!isNaN(wNum) && wNum > 0) demographics.weight_kg = wNum;
 
     try {
@@ -348,7 +371,7 @@ export default function SettingsScreen() {
               maxLength={3}
               autoFocus
             />
-            <Pressable style={styles.saveBtn} onPress={() => saveAll()}>
+            <Pressable style={styles.saveBtn} onPress={() => saveAll({ age: editAge })}>
               <Text style={styles.saveBtnText}>{saving ? '...' : 'SAVE'}</Text>
             </Pressable>
           </View>
@@ -369,7 +392,7 @@ export default function SettingsScreen() {
               return (
                 <Pressable
                   key={opt.value}
-                  onPress={() => { setEditGender(opt.value); setEditingKey(null); saveAll(); }}
+                  onPress={() => { setEditGender(opt.value); saveAll({ gender: opt.value }); }}
                   style={[styles.optionChip, isSelected && styles.optionChipSelected]}>
                   <Text style={[styles.optionChipText, isSelected && styles.optionChipTextSelected]}>
                     {opt.label}
@@ -400,7 +423,7 @@ export default function SettingsScreen() {
               maxLength={3}
               autoFocus
             />
-            <Pressable style={styles.saveBtn} onPress={() => saveAll()}>
+            <Pressable style={styles.saveBtn} onPress={() => saveAll({ heightCm: editHeightCm })}>
               <Text style={styles.saveBtnText}>{saving ? '...' : 'SAVE'}</Text>
             </Pressable>
           </View>
@@ -426,7 +449,7 @@ export default function SettingsScreen() {
               maxLength={5}
               autoFocus
             />
-            <Pressable style={styles.saveBtn} onPress={() => saveAll()}>
+            <Pressable style={styles.saveBtn} onPress={() => saveAll({ weightKg: editWeightKg })}>
               <Text style={styles.saveBtnText}>{saving ? '...' : 'SAVE'}</Text>
             </Pressable>
           </View>
@@ -533,7 +556,7 @@ export default function SettingsScreen() {
 
           <Pressable
             style={[styles.saveLiftBtn, saving && { opacity: 0.5 }]}
-            onPress={() => saveAll()}
+            onPress={() => saveAll({ bench: editBench, squat: editSquat, deadlift: editDeadlift, liftUnit: editLiftUnit })}
             disabled={saving}>
             <Text style={styles.saveLiftBtnText}>{saving ? 'SAVING...' : 'SAVE LIFTS'}</Text>
           </Pressable>
@@ -564,7 +587,7 @@ export default function SettingsScreen() {
               />
               <Pressable
                 style={[styles.saveLiftBtn, saving && { opacity: 0.5 }]}
-                onPress={() => saveAll()}
+                onPress={() => saveAll({ history: editHistory })}
                 disabled={saving}>
                 <Text style={styles.saveLiftBtnText}>{saving ? 'SAVING...' : 'SAVE'}</Text>
               </Pressable>

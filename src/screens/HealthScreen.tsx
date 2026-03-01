@@ -1,6 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Linking,
   Platform,
   Pressable,
@@ -142,10 +143,13 @@ export default function HealthScreen() {
     if (Platform.OS !== 'ios' || granting) return;
     setGranting(true);
     try {
-      const { initAppleHealth } = await import('../health/appleHealth');
-      const granted = await initAppleHealth();
-      if (granted) {
-        // Try immediate ingestion after granting
+      const { initAppleHealth, getPermissionStatus: checkPerm } = await import('../health/appleHealth');
+      await initAppleHealth();
+
+      // Check if permissions were actually granted
+      const status = await checkPerm();
+      if (status === 'granted') {
+        // Try immediate ingestion
         try {
           const authToken = await getMeta('auth_token');
           if (authToken) {
@@ -154,10 +158,22 @@ export default function HealthScreen() {
         } catch {
           // ingestion failure is non-fatal
         }
+        await load();
+      } else {
+        // iOS only shows the HealthKit dialog once.
+        // If we're here, the user was already prompted or denied.
+        await load();
+        Alert.alert(
+          'Health Access',
+          'If the permission dialog didn\'t appear, you may have already been prompted.\n\nGo to Settings → Health → Attunedd to enable access.',
+          [
+            { text: 'Open Settings', onPress: () => Linking.openSettings() },
+            { text: 'OK', style: 'cancel' },
+          ],
+        );
       }
-      await load();
     } catch {
-      // non-fatal
+      Alert.alert('Error', 'Could not connect to Apple Health. Please try again.');
     } finally {
       setGranting(false);
     }
