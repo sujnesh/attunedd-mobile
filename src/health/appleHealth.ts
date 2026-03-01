@@ -15,6 +15,42 @@ const PERMISSIONS = {
   },
 };
 
+export type PermissionStatus = 'granted' | 'denied' | 'not_determined' | 'unavailable';
+
+export async function getPermissionStatus(): Promise<PermissionStatus> {
+  try {
+    const isAvailable = await new Promise<boolean>((resolve) => {
+      AppleHealthKit.isAvailable((err: string, available: boolean) => {
+        resolve(!err && available);
+      });
+    });
+    if (!isAvailable) return 'unavailable';
+
+    const authStatus = await new Promise<number>((resolve) => {
+      AppleHealthKit.getAuthStatus(
+        { permissions: PERMISSIONS.permissions },
+        (err: string, result: { permissions: { read: number[] } }) => {
+          if (err || !result?.permissions?.read) {
+            resolve(0);
+            return;
+          }
+          // HealthKit auth statuses: 0=not_determined, 1=denied, 2=authorized
+          const statuses = result.permissions.read;
+          if (statuses.every((s: number) => s === 2)) resolve(2);
+          else if (statuses.some((s: number) => s === 1)) resolve(1);
+          else resolve(0);
+        },
+      );
+    });
+
+    if (authStatus === 2) return 'granted';
+    if (authStatus === 1) return 'denied';
+    return 'not_determined';
+  } catch {
+    return 'not_determined';
+  }
+}
+
 export async function initAppleHealth(): Promise<boolean> {
   return new Promise((resolve) => {
     AppleHealthKit.initHealthKit(PERMISSIONS, (err) => {

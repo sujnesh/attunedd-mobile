@@ -8,6 +8,7 @@ import {
 import { applyAuthoritativeState } from './reconciliation';
 import { EVENT_TYPES } from './eventTypes';
 import { API_BASE_URL } from '../config';
+import { setMeta } from '../services/metaStateService';
 
 const EVENTS_ENDPOINT = `${API_BASE_URL}/api/mobile/events`;
 
@@ -112,6 +113,9 @@ export async function flushQueue(authToken: string): Promise<FlushResult> {
     }
 
     await setLastSyncAt(new Date().toISOString());
+
+    // Persist flush diagnostics
+    await setMeta('last_flush_result_json', JSON.stringify(result)).catch(() => {});
 
     return result;
   } finally {
