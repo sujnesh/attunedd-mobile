@@ -69,6 +69,8 @@ export interface DebriefData {
   sets_logged: number;
   muscles_trained: string[];
   summary_line: string;
+  override_count?: number;
+  key_observation?: string;
 }
 
 export interface CoachingTodayResponse {

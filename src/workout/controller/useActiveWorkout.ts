@@ -400,13 +400,13 @@ export function useActiveWorkout(): UseActiveWorkoutReturn {
         }
         if (flushResult.failed > 0) {
           // Don't throw — return local debrief instead of stranding user
-          return buildLocalDebrief(session);
+          return buildLocalDebrief(session, overrides.count);
         }
       }
 
       // Fallback: run local evaluation, return local debrief
       await runEvaluation();
-      return buildLocalDebrief(session);
+      return buildLocalDebrief(session, overrides.count);
     } finally {
       // Clear all dashboard caches so next load fetches fresh data
       await setMeta('cache_coaching_today', '');
@@ -468,7 +468,39 @@ async function getAppVersion(): Promise<string> {
   return '1.0.0';
 }
 
-function buildLocalDebrief(session: SessionState): DebriefData {
+function buildKeyObservation(session: SessionState): string | undefined {
+  if (session.sets.length === 0) return undefined;
+
+  // Find heaviest lift (by weight)
+  let heaviest: { name: string; weight: number; reps: number } | null = null;
+  for (const s of session.sets) {
+    if (s.weight != null && (heaviest == null || s.weight > heaviest.weight)) {
+      heaviest = { name: s.exerciseName, weight: s.weight, reps: s.reps };
+    }
+  }
+  if (heaviest) {
+    return `Heaviest: ${heaviest.name} ${heaviest.weight}kg x ${heaviest.reps}`;
+  }
+
+  // Fallback: most volume exercise (most sets)
+  const countMap = new Map<string, number>();
+  for (const s of session.sets) {
+    countMap.set(s.exerciseName, (countMap.get(s.exerciseName) ?? 0) + 1);
+  }
+  let mostVolume = { name: '', count: 0 };
+  for (const [name, count] of countMap) {
+    if (count > mostVolume.count) {
+      mostVolume = { name, count };
+    }
+  }
+  if (mostVolume.count > 0) {
+    return `Most volume: ${mostVolume.name} (${mostVolume.count} sets)`;
+  }
+
+  return undefined;
+}
+
+function buildLocalDebrief(session: SessionState, overrideCount?: number): DebriefData {
   const exerciseNames = [...new Set(session.sets.map((s) => s.exerciseName))];
   const stressUtil =
     session.allowedStress > 0
@@ -494,5 +526,7 @@ function buildLocalDebrief(session: SessionState): DebriefData {
     sets_logged: session.sets.length,
     muscles_trained: exerciseNames,
     summary_line: `${session.sets.length} sets in ${durationMin} min. Sync pending \u2014 full analysis available when connected.`,
+    override_count: overrideCount,
+    key_observation: buildKeyObservation(session),
   };
 }

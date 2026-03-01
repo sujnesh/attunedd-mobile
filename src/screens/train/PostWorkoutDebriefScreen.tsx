@@ -112,7 +112,19 @@ export default function PostWorkoutDebriefScreen({ route, navigation }: PostWork
           </InfoChip>
           <Text style={styles.metricValue}>{debrief.sets_logged}</Text>
         </View>
+        {debrief.override_count != null && debrief.override_count > 0 && (
+          <View style={styles.metricRow}>
+            <Text style={styles.metricLabelOverride}>OVERRIDES</Text>
+            <Text style={styles.metricValueOverride}>{debrief.override_count}</Text>
+          </View>
+        )}
       </View>
+
+      {debrief.key_observation && (
+        <View style={styles.observationSection}>
+          <Text style={styles.observationText}>{debrief.key_observation}</Text>
+        </View>
+      )}
 
       {debrief.muscles_trained.length > 0 && (
         <View style={styles.section}>
@@ -233,6 +245,29 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     fontFamily: MONO,
+  },
+  metricLabelOverride: {
+    color: '#F1C40F',
+    fontSize: 12,
+    fontWeight: '500',
+    letterSpacing: 2,
+  },
+  metricValueOverride: {
+    color: '#F1C40F',
+    fontSize: 14,
+    fontWeight: '500',
+    fontFamily: MONO,
+  },
+  observationSection: {
+    width: '100%',
+    paddingVertical: 12,
+    marginBottom: 8,
+  },
+  observationText: {
+    color: '#999999',
+    fontSize: 13,
+    fontFamily: MONO,
+    textAlign: 'center',
   },
   muscleRow: {
     flexDirection: 'row',

@@ -70,6 +70,7 @@ export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorko
   const [feedbackType, setFeedbackType] = useState<'info' | 'warning'>('info');
   const [exerciseNames, setExerciseNames] = useState<string[]>([]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [syncError, setSyncError] = useState(false);
 
   useEffect(() => {
     initSession('planned', draftId);
@@ -228,6 +229,7 @@ export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorko
 
   const doFinish = async () => {
     try {
+      setSyncError(false);
       if (isFirstWorkout) {
         await setMeta('first_workout_completed', 'true');
       }
@@ -238,8 +240,8 @@ export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorko
         navigation.replace('PostWorkoutDebrief', { debrief: buildFallbackDebrief(session) });
       }
     } catch {
-      // Always navigate to debrief — never strand the user
-      navigation.replace('PostWorkoutDebrief', { debrief: buildFallbackDebrief(session) });
+      // Show error bar with retry option
+      setSyncError(true);
     }
   };
 
@@ -470,6 +472,24 @@ export default function PlannedWorkoutScreen({ route, navigation }: PlannedWorko
         </View>
       )}
 
+      {syncError && (
+        <View style={styles.syncErrorBar}>
+          <Text style={styles.syncErrorText}>Sync failed. Data saved locally.</Text>
+          <View style={styles.syncErrorActions}>
+            <Pressable onPress={doFinish} style={styles.syncErrorBtn}>
+              <Text style={styles.syncRetryText}>RETRY</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                navigation.replace('PostWorkoutDebrief', { debrief: buildFallbackDebrief(session) });
+              }}
+              style={styles.syncErrorBtn}>
+              <Text style={styles.syncContinueText}>CONTINUE</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
+
       <ExerciseSuggestions
         suggestions={suggestions}
         onSelect={(name) => {
@@ -645,12 +665,38 @@ function buildFallbackDebrief(session: SessionState | null): DebriefData {
   else if (stressUtil >= 70) effort = 'solid';
   else if (stressUtil >= 40) effort = 'moderate';
   const durationMin = Math.round((Date.now() - session.startedAt) / 60000);
+
+  // Build key observation
+  let keyObs: string | undefined;
+  let heaviest: { name: string; weight: number; reps: number } | null = null;
+  for (const s of session.sets) {
+    if (s.weight != null && (heaviest == null || s.weight > heaviest.weight)) {
+      heaviest = { name: s.exerciseName, weight: s.weight, reps: s.reps };
+    }
+  }
+  if (heaviest) {
+    keyObs = `Heaviest: ${heaviest.name} ${heaviest.weight}kg x ${heaviest.reps}`;
+  } else {
+    const countMap = new Map<string, number>();
+    for (const s of session.sets) {
+      countMap.set(s.exerciseName, (countMap.get(s.exerciseName) ?? 0) + 1);
+    }
+    let mostVolume = { name: '', count: 0 };
+    for (const [name, count] of countMap) {
+      if (count > mostVolume.count) mostVolume = { name, count };
+    }
+    if (mostVolume.count > 0) {
+      keyObs = `Most volume: ${mostVolume.name} (${mostVolume.count} sets)`;
+    }
+  }
+
   return {
     score_before: 0, score_after: 0, adaptation_delta: 0,
     band_before: 'green', band_after: 'green', band_dropped: false,
     stress_utilization: stressUtil, effort_rating: effort,
     sets_logged: session.sets.length, muscles_trained: exerciseNames,
     summary_line: `${session.sets.length} sets in ${durationMin} min. Sync pending \u2014 full analysis available when connected.`,
+    key_observation: keyObs,
   };
 }
 
@@ -1001,6 +1047,38 @@ const styles = StyleSheet.create({
   },
   dismissText: {
     color: '#555555',
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 2,
+  },
+  syncErrorBar: {
+    backgroundColor: '#1A0D0D',
+    borderTopWidth: 0.5,
+    borderTopColor: '#E74C3C',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+  },
+  syncErrorText: {
+    color: '#E74C3C',
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  syncErrorActions: {
+    flexDirection: 'row',
+    gap: 16,
+  },
+  syncErrorBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  syncRetryText: {
+    color: '#2ECC71',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 2,
+  },
+  syncContinueText: {
+    color: '#888888',
     fontSize: 11,
     fontWeight: '600',
     letterSpacing: 2,
