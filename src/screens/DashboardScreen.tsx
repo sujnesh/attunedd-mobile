@@ -14,13 +14,10 @@ import { getMeta } from '../services/metaStateService';
 import {
   buildExplanation,
   type ExplanationOutput,
-  type PenaltyRow,
-  type LimitRow,
 } from '../services/explanationEngine';
 import { apiCached } from '../services/apiClient';
 import { deriveCaps } from '../state/evaluationEngine';
 import { executeSql } from '../db/database';
-import InfoChip from '../components/InfoChip';
 import DailyCheckIn from '../components/DailyCheckIn';
 import {
   saveCheckIn,
@@ -33,11 +30,9 @@ import type { RootTabParamList } from '../navigation/types';
 import type {
   CoachingTodayResponse,
   ProjectionDay,
-  HeavySessionSimulation,
   ProjectionsResponse,
   CurrentPlanResponse,
   PlanDayData,
-  PlanExercise,
 } from '../types/api';
 
 interface RecentWorkout {
@@ -65,12 +60,6 @@ const BAND_LABELS: Record<string, string> = {
 };
 
 const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
-
-const MODE_COLORS: Record<string, string> = {
-  push: '#2ECC71',
-  maintain: '#888888',
-  fatigue_management: '#F1C40F',
-};
 
 function mapServerToReadinessState(server: CoachingTodayResponse): ReadinessState {
   const score = Math.round(server.adaptation_score);
@@ -127,8 +116,8 @@ function buildHeadline(
     if (top.category === 'recovery_window') return 'Recovery window active.';
     if (top.category === 'systemic_fatigue') {
       const ratio = rawMetrics.rolling_strain_ratio;
-      if (typeof ratio === 'number') return `Systemic fatigue elevated ${Math.round((ratio - 1) * 100)}%.`;
-      return 'Systemic fatigue elevated.';
+      if (typeof ratio === 'number') return `Training load elevated ${Math.round((ratio - 1) * 100)}%.`;
+      return 'Training load elevated.';
     }
     if (top.category === 'load_management') {
       const ratio = rawMetrics.rolling_strain_ratio;
@@ -140,7 +129,7 @@ function buildHeadline(
   }
 
   // No penalties — clean state
-  return 'No recovery penalties active.';
+  return 'Recovery on track.';
 }
 
 function buildWhyBullets(
@@ -153,50 +142,49 @@ function buildWhyBullets(
     // Positive state — show what's clear
     const capacity = rawMetrics.capacity_score;
     if (typeof capacity === 'number') {
-      bullets.push(`Recovery capacity ${Math.round(capacity * 100)}%`);
+      bullets.push(`Recovery at ${Math.round(capacity * 100)}%`);
     }
     const ratio = rawMetrics.rolling_strain_ratio;
     if (typeof ratio === 'number') {
-      bullets.push(`Load ratio ${ratio.toFixed(2)}x baseline`);
+      bullets.push(`Load ratio ${ratio.toFixed(2)}x`);
     }
-    bullets.push('Recovery window cleared');
-    bullets.push('Neural fatigue inactive');
+    bullets.push('No recovery concerns');
+    bullets.push('No heavy lift fatigue');
     return bullets;
   }
 
-  // Penalty-based bullets
   for (const p of penalties.sort((a, b) => b.points - a.points).slice(0, 4)) {
     if (p.category === 'recovery_window') {
-      bullets.push(`Recovery window active (-${p.points})`);
+      bullets.push('Recovery window active');
     } else if (p.category === 'systemic_fatigue') {
       const ratio = rawMetrics.rolling_strain_ratio;
       if (typeof ratio === 'number') {
-        bullets.push(`Strain ratio ${ratio.toFixed(2)}x baseline (-${p.points})`);
+        bullets.push(`Load ratio ${ratio.toFixed(2)}x`);
       } else {
-        bullets.push(`Systemic fatigue detected (-${p.points})`);
+        bullets.push('Training load elevated');
       }
     } else if (p.category === 'load_management') {
       const ratio = rawMetrics.rolling_strain_ratio;
       if (typeof ratio === 'number') {
-        bullets.push(`Load elevated ${ratio.toFixed(2)}x (-${p.points})`);
+        bullets.push(`Load ratio ${ratio.toFixed(2)}x`);
       } else {
-        bullets.push(`Load management penalty (-${p.points})`);
+        bullets.push('Training load elevated');
       }
     } else if (p.category === 'override_behavior') {
       const count = rawMetrics.overrides_14d ?? rawMetrics.overrides_7d;
       if (typeof count === 'number') {
-        bullets.push(`${count} recent overrides (-${p.points})`);
+        bullets.push(`${count} recent rest overrides`);
       } else {
-        bullets.push(`Override pattern detected (-${p.points})`);
+        bullets.push('Recent rest day overrides');
       }
     } else {
-      bullets.push(`${p.reason} (-${p.points})`);
+      bullets.push(p.reason);
     }
   }
 
   const capacity = rawMetrics.capacity_score;
-  if (typeof capacity === 'number' && !bullets.some((b) => b.includes('capacity'))) {
-    bullets.push(`Recovery capacity ${Math.round(capacity * 100)}%`);
+  if (typeof capacity === 'number' && !bullets.some((b) => b.includes('Recovery'))) {
+    bullets.push(`Recovery at ${Math.round(capacity * 100)}%`);
   }
 
   return bullets;
@@ -209,7 +197,6 @@ export default function DashboardScreen() {
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [projections, setProjections] = useState<ProjectionDay[]>([]);
-  const [heavySim, setHeavySim] = useState<HeavySessionSimulation | null>(null);
   const [todayPlan, setTodayPlan] = useState<PlanDayData | null>(null);
   const [recentWorkouts, setRecentWorkouts] = useState<RecentWorkout[]>([]);
   const [showCheckIn, setShowCheckIn] = useState(false);
@@ -236,7 +223,6 @@ export default function DashboardScreen() {
     try {
       const body = await apiCached<ProjectionsResponse>('/api/coaching/projections', 'cache_projections');
       setProjections(body.projections);
-      setHeavySim(body.heavy_session_simulation);
     } catch {
       // non-fatal
     }
@@ -338,7 +324,7 @@ export default function DashboardScreen() {
           style={styles.refreshButton}
           disabled={refreshing}>
           <Text style={[styles.refreshText, refreshing && styles.refreshing]}>
-            {refreshing ? 'REFRESHING' : 'REFRESH'}
+            {refreshing ? 'Refreshing' : 'Refresh'}
           </Text>
         </Pressable>
       </View>
@@ -359,6 +345,9 @@ export default function DashboardScreen() {
   const headline = buildHeadline(data.coaching, explanation, data.penalties, data.rawMetrics, checkInState);
   const whyBullets = buildWhyBullets(data.penalties, data.rawMetrics);
   const checkInBullets = checkInState ? getCheckInContext(checkInState) : [];
+  const isHighRisk = data.band === 'high_risk' || data.band === 'red';
+  const hasPendingSession = todayPlan && !todayPlan.rest_day && todayPlan.workout_status !== 'completed';
+  const showTrainCTA = hasPendingSession && !showCheckIn && !isHighRisk;
 
   return (
     <>
@@ -371,49 +360,71 @@ export default function DashboardScreen() {
       style={styles.scrollRoot}
       contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 48, paddingBottom: insets.bottom + 40 }]}
     >
-      {/* Primary focal point: Score + Band + Headline */}
-      <InfoChip topic="adaptation_score" color={accent}>
-        <Text style={[styles.score, { color: accent }]}>{data.score}</Text>
-      </InfoChip>
-      <InfoChip topic="risk_band" color={accent}>
-        <Text style={[styles.bandLabel, { color: accent }]}>{bandLabel}</Text>
-      </InfoChip>
-      <Text style={styles.headline}>{headline}</Text>
+      {/* 1. Coaching Headline — primary, dominant */}
+      <Text style={[styles.headline, { color: accent }]}>{headline}</Text>
 
-      {/* WHY section — only if data available */}
-      {(whyBullets.length > 0 || checkInBullets.length > 0) && (
-        <View style={styles.whySection}>
-          <Text style={styles.whySectionLabel}>WHY</Text>
-          {whyBullets.map((bullet, i) => (
-            <Text key={`p-${i}`} style={styles.whyBullet}>{'\u2022'} {bullet}</Text>
-          ))}
-          {checkInBullets.map((bullet, i) => (
-            <Text key={`c-${i}`} style={styles.whyBulletCheckIn}>{'\u2022'} {bullet}</Text>
-          ))}
+      {/* 2. Readiness Score + Band */}
+      <Text style={[styles.score, { color: accent }]}>{data.score}</Text>
+      <Text style={[styles.bandLabel, { color: accent }]}>{bandLabel}</Text>
+
+      {/* 3. Dynamic Action Block — one visible at a time */}
+      {isHighRisk ? (
+        <View style={styles.actionBlock}>
+          <Text style={styles.actionHeading}>Recovery day recommended</Text>
+          <Text style={styles.actionSubtext}>
+            {explanation.decisionLine}
+          </Text>
+          {todayPlan && (
+            <Pressable
+              onPress={() => navigation.navigate('Train', { screen: 'PlanDetail' })}
+              style={styles.secondaryBtn}>
+              <Text style={styles.secondaryBtnText}>View plan</Text>
+            </Pressable>
+          )}
         </View>
-      )}
-
-      {/* Coaching nudges — specific insights only */}
-      {data.coaching?.nudges && data.coaching.nudges.length > 0 && (
-        <View style={styles.insightsSection}>
-          <Text style={styles.sectionLabel}>INSIGHTS</Text>
-          {data.coaching.nudges.map((nudge, i) => (
-            <Text key={i} style={styles.insightText}>{nudge}</Text>
-          ))}
-        </View>
-      )}
-
-      {/* Today's prescription */}
-      {todayPlan && (
+      ) : todayPlan ? (
         <TodayPlanCard
           day={todayPlan}
           caps={data.caps}
+          showCTA={!!showTrainCTA}
           onStartWorkout={() => navigation.navigate('Train', { screen: 'TrainHome' })}
           onViewPlan={() => navigation.navigate('Train', { screen: 'PlanDetail' })}
         />
+      ) : projections.length > 0 ? (
+        <ProjectionsSection projections={projections} />
+      ) : null}
+
+      {/* 4. Train Today CTA — only when not competing with check-in/recovery */}
+      {showTrainCTA && !todayPlan && (
+        <Pressable
+          onPress={() => navigation.navigate('Train', { screen: 'TrainHome' })}
+          style={({ pressed }) => [styles.startBtn, pressed && styles.startBtnPressed]}>
+          <Text style={styles.startBtnText}>Train today</Text>
+        </Pressable>
       )}
 
-      {/* Recent workouts */}
+      {/* 5. Context — merged recovery context + insights, secondary */}
+      {(whyBullets.length > 0 || checkInBullets.length > 0 ||
+        (data.coaching?.nudges && data.coaching.nudges.length > 0)) && (
+        <View style={styles.contextSection}>
+          {whyBullets.map((bullet, i) => (
+            <Text key={`p-${i}`} style={styles.contextBullet}>{'\u2022'} {bullet}</Text>
+          ))}
+          {checkInBullets.map((bullet, i) => (
+            <Text key={`c-${i}`} style={styles.contextBulletHighlight}>{'\u2022'} {bullet}</Text>
+          ))}
+          {data.coaching?.nudges?.map((nudge, i) => (
+            <Text key={`n-${i}`} style={styles.contextBullet}>{'\u2022'} {nudge}</Text>
+          ))}
+        </View>
+      )}
+
+      {/* Coming up — simplified projections (only if not already shown in action block) */}
+      {projections.length > 0 && todayPlan && (
+        <ProjectionsSection projections={projections} />
+      )}
+
+      {/* Recent sessions */}
       {recentWorkouts.length > 0 && (
         <RecentWorkoutsSection
           workouts={recentWorkouts}
@@ -421,22 +432,12 @@ export default function DashboardScreen() {
         />
       )}
 
-      {/* Session limits */}
-      {explanation.sessionLimits.some((l) => l.restricted) && (
-        <SessionLimitsSection limits={explanation.sessionLimits} />
-      )}
-
-      {/* Projections */}
-      {projections.length > 0 && (
-        <ProjectionsSection projections={projections} heavySim={heavySim} />
-      )}
-
       <Pressable
         onPress={handleRefresh}
         style={styles.refreshButton}
         disabled={refreshing}>
         <Text style={[styles.refreshText, refreshing && styles.refreshing]}>
-          {refreshing ? 'REFRESHING' : 'REFRESH'}
+          {refreshing ? 'Refreshing' : 'Refresh'}
         </Text>
       </Pressable>
     </ScrollView>
@@ -447,15 +448,18 @@ export default function DashboardScreen() {
 function TodayPlanCard({
   day,
   caps,
+  showCTA,
   onStartWorkout,
   onViewPlan,
 }: {
   day: PlanDayData;
   caps: ParsedCaps;
+  showCTA: boolean;
   onStartWorkout: () => void;
   onViewPlan: () => void;
 }) {
-  const sessionLabel = day.session_type.replace(/_/g, ' ').toUpperCase();
+  const sessionLabel = day.session_type.replace(/_/g, ' ');
+  const sessionTitle = sessionLabel.charAt(0).toUpperCase() + sessionLabel.slice(1);
   const mainBlock = day.blocks.find((b) => b.name === 'Main');
   const mainExercises = mainBlock?.exercises?.filter((e) => e.sets) ?? [];
   const primaryMuscles = mainExercises
@@ -466,8 +470,8 @@ function TodayPlanCard({
   if (day.rest_day) {
     return (
       <Pressable style={styles.todayCard} onPress={onViewPlan}>
-        <Text style={styles.todayLabel}>TODAY</Text>
-        <Text style={styles.todayType}>Rest Day</Text>
+        <Text style={styles.todayLabel}>Today</Text>
+        <Text style={styles.todayType}>Rest day</Text>
         {day.rationale ? (
           <Text style={styles.todayContext}>{day.rationale}</Text>
         ) : (
@@ -480,43 +484,36 @@ function TodayPlanCard({
   if (day.workout_status === 'completed') {
     return (
       <Pressable style={styles.todayCard} onPress={onViewPlan}>
-        <Text style={styles.todayLabel}>TODAY</Text>
-        <Text style={styles.todayType}>{sessionLabel}</Text>
+        <Text style={styles.todayLabel}>Today</Text>
+        <Text style={styles.todayType}>{sessionTitle}</Text>
         <Text style={styles.todayCompleted}>Completed</Text>
       </Pressable>
     );
   }
 
-  // Derive coaching mode from rationale or caps
-  const coachingMode = caps.maxStressPct < 85
-    ? 'Fatigue Mgmt'
-    : caps.blockHeavyNeural
-    ? 'Recovery'
-    : 'Maintain';
-
   return (
     <Pressable style={styles.todayCard} onPress={onViewPlan}>
-      <Text style={styles.todayLabel}>TODAY</Text>
-      <Text style={styles.todayType}>
-        {sessionLabel} {'\u2014'} {coachingMode}
-      </Text>
+      <Text style={styles.todayLabel}>Today</Text>
+      <Text style={styles.todayType}>{sessionTitle}</Text>
       {day.rationale ? (
         <Text style={styles.todayRationale}>{day.rationale}</Text>
       ) : null}
       {primaryMuscles ? (
-        <Text style={styles.todayMuscles}>Primary: {primaryMuscles}</Text>
+        <Text style={styles.todayMuscles}>{primaryMuscles}</Text>
       ) : null}
       {caps.maxStressPct < 100 && (
-        <Text style={styles.todayCap}>Intensity cap: {caps.maxStressPct}%</Text>
+        <Text style={styles.todayCap}>Intensity capped at {caps.maxStressPct}%</Text>
       )}
-      <Pressable
-        onPress={onStartWorkout}
-        style={({ pressed }) => [
-          styles.startBtn,
-          pressed && styles.startBtnPressed,
-        ]}>
-        <Text style={styles.startBtnText}>Start Session</Text>
-      </Pressable>
+      {showCTA && (
+        <Pressable
+          onPress={onStartWorkout}
+          style={({ pressed }) => [
+            styles.startBtn,
+            pressed && styles.startBtnPressed,
+          ]}>
+          <Text style={styles.startBtnText}>Train today</Text>
+        </Pressable>
+      )}
     </Pressable>
   );
 }
@@ -531,8 +528,8 @@ function RecentWorkoutsSection({
   return (
     <View style={styles.section}>
       <Pressable onPress={onViewAll} style={styles.recentHeader}>
-        <Text style={styles.sectionLabel}>RECENT</Text>
-        <Text style={styles.viewAllText}>View All</Text>
+        <Text style={styles.sectionLabel}>Recent</Text>
+        <Text style={styles.viewAllText}>View all</Text>
       </Pressable>
       {workouts.map((w, i) => {
         const d = new Date(w.completedAt);
@@ -550,23 +547,6 @@ function RecentWorkoutsSection({
   );
 }
 
-function SessionLimitsSection({ limits }: { limits: LimitRow[] }) {
-  const restricted = limits.filter((l) => l.restricted);
-  if (restricted.length === 0) return null;
-
-  return (
-    <View style={styles.section}>
-      <Text style={styles.sectionLabel}>SESSION LIMITS</Text>
-      {restricted.map((limit, i) => (
-        <View key={i} style={styles.capsRow}>
-          <Text style={styles.capsLabel}>{limit.label}</Text>
-          <Text style={styles.capsValueRestricted}>{limit.value}</Text>
-        </View>
-      ))}
-    </View>
-  );
-}
-
 function formatProjectionDate(iso: string): string {
   const d = new Date(iso + 'T00:00:00');
   const days = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
@@ -575,46 +555,34 @@ function formatProjectionDate(iso: string): string {
 
 function ProjectionsSection({
   projections,
-  heavySim,
 }: {
   projections: ProjectionDay[];
-  heavySim: HeavySessionSimulation | null;
 }) {
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionLabel}>NEXT 2 DAYS</Text>
+      <Text style={styles.sectionLabel}>Coming up</Text>
       {projections.map((p) => {
-        const sessionType = p.session_type.replace(/_/g, ' ').toUpperCase();
-        const mode = p.coaching_mode.replace(/_/g, ' ');
-        const modeColor = MODE_COLORS[p.coaching_mode] ?? '#888888';
+        const sessionType = p.session_type.replace(/_/g, ' ');
+        const sessionTitle = sessionType.charAt(0).toUpperCase() + sessionType.slice(1);
 
-        // Dynamic metric per day
-        let metric: string | null = null;
+        let detail: string | null = null;
         if (p.rest_reason) {
-          metric = p.rest_reason;
+          detail = p.rest_reason;
         } else if (p.primary_muscles.length > 0) {
-          metric = p.primary_muscles.map((m) => m.replace(/_/g, ' ')).join(', ');
+          detail = p.primary_muscles.map((m) => m.replace(/_/g, ' ')).join(', ');
         }
 
         return (
           <View key={p.date} style={styles.projectionDay}>
-            <View style={styles.projectionHeader}>
-              <Text style={styles.projectionDate}>
-                {formatProjectionDate(p.date)} {'\u2014'} {sessionType}
-              </Text>
-              <Text style={[styles.projectionMode, { color: modeColor }]}>
-                {mode}
-              </Text>
-            </View>
-            {metric && (
-              <Text style={styles.projectionMetric}>{metric}</Text>
+            <Text style={styles.projectionDate}>
+              {formatProjectionDate(p.date)} {'\u2014'} {sessionTitle}
+            </Text>
+            {detail && (
+              <Text style={styles.projectionMetric}>{detail}</Text>
             )}
           </View>
         );
       })}
-      {heavySim && heavySim.warning && (
-        <Text style={styles.simWarning}>{heavySim.warning}</Text>
-      )}
     </View>
   );
 }
@@ -651,62 +619,81 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     marginBottom: 32,
   },
-  // Primary focal point
+  // 1. Coaching headline — dominant element
+  headline: {
+    fontSize: 20,
+    fontWeight: '600',
+    textAlign: 'center',
+    lineHeight: 28,
+    marginBottom: 24,
+    paddingHorizontal: 8,
+  },
+  // 2. Score + band
   score: {
-    fontSize: 72,
+    fontSize: 56,
     fontWeight: '200',
     fontFamily: MONO,
     letterSpacing: 2,
-    marginBottom: 8,
+    marginBottom: 6,
   },
   bandLabel: {
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '700',
-    letterSpacing: 6,
-    marginBottom: 20,
-  },
-  headline: {
-    color: '#CCCCCC',
-    fontSize: 15,
-    textAlign: 'center',
-    lineHeight: 22,
+    letterSpacing: 5,
     marginBottom: 32,
-    paddingHorizontal: 8,
   },
-  // WHY section
-  whySection: {
+  // 3. Dynamic action block
+  actionBlock: {
     width: '100%',
-    marginBottom: 32,
+    paddingVertical: 24,
+    paddingHorizontal: 4,
+    marginBottom: 24,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#1A1A1A',
+    alignItems: 'center',
   },
-  whySectionLabel: {
-    color: '#555555',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 3,
-    marginBottom: 12,
+  actionHeading: {
+    color: '#E74C3C',
+    fontSize: 17,
+    fontWeight: '600',
+    marginBottom: 8,
   },
-  whyBullet: {
+  actionSubtext: {
     color: '#888888',
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  secondaryBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderWidth: 1,
+    borderColor: '#333333',
+  },
+  secondaryBtnText: {
+    color: '#888888',
+    fontSize: 13,
+    letterSpacing: 1,
+  },
+  // 5. Context section — merged recovery + insights
+  contextSection: {
+    width: '100%',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#1A1A1A',
+    paddingTop: 20,
+    marginBottom: 24,
+  },
+  contextBullet: {
+    color: '#666666',
     fontSize: 13,
     lineHeight: 22,
     paddingLeft: 4,
   },
-  whyBulletCheckIn: {
+  contextBulletHighlight: {
     color: '#F1C40F',
     fontSize: 13,
     lineHeight: 22,
-    paddingLeft: 4,
-  },
-  // Insights
-  insightsSection: {
-    width: '100%',
-    marginBottom: 32,
-  },
-  insightText: {
-    color: '#999999',
-    fontSize: 13,
-    lineHeight: 20,
-    marginBottom: 6,
     paddingLeft: 4,
   },
   // Sections
@@ -719,9 +706,9 @@ const styles = StyleSheet.create({
   },
   sectionLabel: {
     color: '#555555',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 3,
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 2,
     marginBottom: 16,
   },
   // Today's plan
@@ -735,9 +722,9 @@ const styles = StyleSheet.create({
   },
   todayLabel: {
     color: '#555555',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 3,
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 2,
     marginBottom: 10,
   },
   todayType: {
@@ -786,7 +773,7 @@ const styles = StyleSheet.create({
   },
   startBtnText: {
     color: '#0A0A0A',
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '700',
     letterSpacing: 1,
   },
@@ -824,52 +811,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: MONO,
   },
-  // Session limits
-  capsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-  },
-  capsLabel: {
-    color: '#888888',
-    fontSize: 12,
-    letterSpacing: 2,
-  },
-  capsValueRestricted: {
-    color: '#F1C40F',
-    fontSize: 14,
-    fontWeight: '500',
-    fontFamily: MONO,
-  },
   // Projections
   projectionDay: {
-    marginBottom: 20,
-  },
-  projectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
+    marginBottom: 16,
   },
   projectionDate: {
-    color: '#EAEAEA',
+    color: '#CCCCCC',
     fontSize: 13,
     fontWeight: '500',
-  },
-  projectionMode: {
-    fontSize: 11,
-    fontWeight: '500',
-    letterSpacing: 1,
   },
   projectionMetric: {
     color: '#666666',
     fontSize: 12,
-    marginTop: 2,
-  },
-  simWarning: {
-    color: '#F1C40F',
-    fontSize: 12,
-    marginTop: 8,
+    marginTop: 4,
   },
   // Refresh
   refreshButton: {

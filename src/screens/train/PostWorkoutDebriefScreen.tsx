@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { PostWorkoutDebriefProps } from '../../navigation/types';
-import InfoChip from '../../components/InfoChip';
 import { getMeta } from '../../services/metaStateService';
 
 const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
@@ -55,13 +54,13 @@ export default function PostWorkoutDebriefScreen({ route, navigation }: PostWork
         styles.content,
         { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 32 },
       ]}>
-      <Text style={styles.label}>SESSION COMPLETE</Text>
+      <Text style={styles.label}>Session complete</Text>
 
       <Text style={styles.summaryLine}>{debrief.summary_line}</Text>
 
       <View style={styles.scoreRow}>
         <View style={styles.scoreBlock}>
-          <Text style={styles.scoreLabel}>BEFORE</Text>
+          <Text style={styles.scoreLabel}>Before</Text>
           <Text style={styles.scoreValue}>{debrief.score_before}</Text>
         </View>
         <View style={styles.deltaBlock}>
@@ -70,7 +69,7 @@ export default function PostWorkoutDebriefScreen({ route, navigation }: PostWork
           </Text>
         </View>
         <View style={styles.scoreBlock}>
-          <Text style={styles.scoreLabel}>AFTER</Text>
+          <Text style={styles.scoreLabel}>After</Text>
           <Text style={[styles.scoreValue, { color: bandAfterColor }]}>
             {debrief.score_after}
           </Text>
@@ -79,9 +78,7 @@ export default function PostWorkoutDebriefScreen({ route, navigation }: PostWork
 
       {debrief.band_dropped && (
         <View style={styles.bandDropBadge}>
-          <InfoChip topic="risk_band">
-            <Text style={styles.bandDropText}>BAND DROP</Text>
-          </InfoChip>
+          <Text style={styles.bandDropText}>Score dropped</Text>
         </View>
       )}
 
@@ -93,28 +90,24 @@ export default function PostWorkoutDebriefScreen({ route, navigation }: PostWork
 
       <View style={styles.section}>
         <View style={styles.metricRow}>
-          <Text style={styles.metricLabel}>EFFORT</Text>
+          <Text style={styles.metricLabel}>Effort</Text>
           <Text style={[styles.metricValue, { color: effortColor }]}>
-            {debrief.effort_rating.toUpperCase()}
+            {debrief.effort_rating.charAt(0).toUpperCase() + debrief.effort_rating.slice(1)}
           </Text>
         </View>
         <View style={styles.metricRow}>
-          <InfoChip topic="stress_units">
-            <Text style={styles.metricLabel}>STRESS USED</Text>
-          </InfoChip>
+          <Text style={styles.metricLabel}>Intensity</Text>
           <Text style={styles.metricValue}>
             {Math.round(debrief.stress_utilization * 100)}%
           </Text>
         </View>
         <View style={styles.metricRow}>
-          <InfoChip topic="sets">
-            <Text style={styles.metricLabel}>SETS LOGGED</Text>
-          </InfoChip>
+          <Text style={styles.metricLabel}>Sets</Text>
           <Text style={styles.metricValue}>{debrief.sets_logged}</Text>
         </View>
         {debrief.override_count != null && debrief.override_count > 0 && (
           <View style={styles.metricRow}>
-            <Text style={styles.metricLabelOverride}>OVERRIDES</Text>
+            <Text style={styles.metricLabelOverride}>Rest overrides</Text>
             <Text style={styles.metricValueOverride}>{debrief.override_count}</Text>
           </View>
         )}
@@ -128,11 +121,11 @@ export default function PostWorkoutDebriefScreen({ route, navigation }: PostWork
 
       {debrief.muscles_trained.length > 0 && (
         <View style={styles.section}>
-          <Text style={styles.sectionHeader}>MUSCLES TRAINED</Text>
+          <Text style={styles.sectionHeader}>Trained</Text>
           <View style={styles.muscleRow}>
             {debrief.muscles_trained.map((muscle) => (
               <Text key={muscle} style={styles.muscleChip}>
-                {muscle.replace(/_/g, ' ').toUpperCase()}
+                {muscle.replace(/_/g, ' ')}
               </Text>
             ))}
           </View>
@@ -140,7 +133,7 @@ export default function PostWorkoutDebriefScreen({ route, navigation }: PostWork
       )}
 
       <Pressable onPress={handleDone} style={styles.doneButton}>
-        <Text style={styles.doneText}>DONE</Text>
+        <Text style={styles.doneText}>Done</Text>
       </Pressable>
     </ScrollView>
   );
