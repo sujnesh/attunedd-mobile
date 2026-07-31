@@ -1,97 +1,78 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# Attunedd Mobile
 
-# Getting Started
+React Native + TypeScript mobile app for adaptive strength training. The app pairs workout execution, health-signal ingestion, local state, and backend sync with the Attunedd Rails API.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+This repo is the mobile client for the Attunedd coaching system: onboarding, dashboard, planned/free-form workouts, post-workout debriefs, health data, and sync reliability.
 
-## Step 1: Start Metro
+## What It Does
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+- Runs onboarding, login, registration, settings, and dashboard flows
+- Supports planned workouts and free-form workout logging
+- Tracks active workout state, timers, deviations, nudges, overrides, and post-workout debriefs
+- Imports health signals from Apple Health and Android Health Connect
+- Normalizes and deduplicates health samples before sync
+- Uses a local event queue and reconciliation engine for mobile/backend state sync
+- Evaluates readiness, stress, fatigue, and background signals for coaching context
+- Sends notifications from policy-driven state changes
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+## Project Layout
 
-```sh
-# Using npm
+```text
+src/navigation/        App and training navigation stacks
+src/screens/           Auth, onboarding, dashboard, health, settings, training screens
+src/screens/train/     Workout execution, plan detail, history, and debrief screens
+src/health/            Apple Health, Health Connect, normalization, dedupe, ingestion
+src/services/          API client, workout, check-in, readiness, health, and parser services
+src/state/             Background bridge, evaluation, scheduling, notification policy
+src/sync/              Event queue, event types, reconciliation, sync engine
+src/workout/           Active workout controller and coaching/session engines
+__tests__/             Jest smoke tests
+```
+
+## Tech Stack
+
+- React Native 0.84
+- TypeScript
+- React Navigation
+- SQLite local storage
+- Apple Health and Health Connect integrations
+- Background fetch
+- Push notifications
+- Jest, ESLint, Prettier
+- GitHub Actions CI
+
+## Run Locally
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Start Metro:
+
+```bash
 npm start
-
-# OR using Yarn
-yarn start
 ```
 
-## Step 2: Build and run your app
+Run the app:
 
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
-
-### Android
-
-```sh
-# Using npm
-npm run android
-
-# OR using Yarn
-yarn android
-```
-
-### iOS
-
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
-
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
-
-```sh
-bundle install
-```
-
-Then, and every time you update your native dependencies, run:
-
-```sh
-bundle exec pod install
-```
-
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
-
-```sh
-# Using npm
+```bash
 npm run ios
-
-# OR using Yarn
-yarn ios
+npm run android
 ```
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
+Run checks:
 
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
+```bash
+npm test
+npm run lint
+```
 
-## Step 3: Modify your app
+## Backend
 
-Now that you have successfully run the app, let's make changes!
+The app is designed to talk to the [Attunedd Rails API](https://github.com/sujnesh/attunedd). Configure the API base URL in the mobile service layer before using backend-backed flows.
 
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
+## Why This Project Matters
 
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
-
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
-
-## Congratulations! :tada:
-
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
-
-# Troubleshooting
-
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+The hard part is not rendering a workout screen. It is keeping coaching state coherent across user edits, health signals, background sync, partial failures, and real workout behavior. This app focuses on that reliability layer.
