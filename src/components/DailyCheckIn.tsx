@@ -87,11 +87,11 @@ export default function DailyCheckIn({ visible, onSubmit, onSkip }: DailyCheckIn
       statusBarTranslucent>
       <View style={styles.overlay}>
         <View style={styles.card}>
-          <Text style={styles.title}>DAILY CHECK-IN</Text>
+          <Text style={styles.title}>Daily check-in</Text>
 
-          <RatingRow label="ENERGY" value={energy} onChange={setEnergy} />
-          <RatingRow label="SLEEP QUALITY" value={sleepQuality} onChange={setSleepQuality} />
-          <RatingRow label="MUSCLE SORENESS" value={soreness} onChange={setSoreness} />
+          <RatingRow label="Energy" value={energy} onChange={setEnergy} />
+          <RatingRow label="Sleep quality" value={sleepQuality} onChange={setSleepQuality} />
+          <RatingRow label="Soreness" value={soreness} onChange={setSoreness} />
 
           <TextInput
             style={styles.noteInput}
@@ -107,7 +107,7 @@ export default function DailyCheckIn({ visible, onSubmit, onSkip }: DailyCheckIn
           <Pressable
             style={({ pressed }) => [styles.doneBtn, pressed && styles.doneBtnPressed]}
             onPress={handleSubmit}>
-            <Text style={styles.doneBtnText}>DONE</Text>
+            <Text style={styles.doneBtnText}>Done</Text>
           </Pressable>
 
           <Pressable onPress={handleSkip} style={styles.skipBtn}>

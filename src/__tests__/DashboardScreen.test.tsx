@@ -16,11 +16,6 @@ jest.mock('../db/database', () => ({
   executeSql: jest.fn().mockResolvedValue([{ rows: { length: 0, item: jest.fn() } }]),
 }));
 
-jest.mock('../components/InfoChip', () => {
-  const { Text } = require('react-native');
-  return ({ children }: { children: React.ReactNode }) => <>{children}</>;
-});
-
 jest.mock('../services/metaStateService', () => ({
   getMeta: jest.fn(),
   setMeta: jest.fn(),
@@ -108,7 +103,7 @@ describe('DashboardScreen', () => {
     });
   });
 
-  it('renders coaching insights when nudges present', async () => {
+  it('renders coaching insights as context bullets', async () => {
     apiCached.mockImplementation((url: string) => {
       if (url === '/api/coaching/today') return Promise.resolve(COACHING_RESPONSE);
       return Promise.reject(new Error('skip'));
@@ -116,12 +111,11 @@ describe('DashboardScreen', () => {
 
     const { getByText } = render(<DashboardScreen />);
     await waitFor(() => {
-      expect(getByText('INSIGHTS')).toBeTruthy();
-      expect(getByText('Chest volume is on track this week.')).toBeTruthy();
+      expect(getByText(/Chest volume is on track this week/)).toBeTruthy();
     });
   });
 
-  it('renders WHY section with no-penalty bullets', async () => {
+  it('renders recovery context bullets', async () => {
     apiCached.mockImplementation((url: string) => {
       if (url === '/api/coaching/today') return Promise.resolve(COACHING_RESPONSE);
       return Promise.reject(new Error('skip'));
@@ -129,11 +123,11 @@ describe('DashboardScreen', () => {
 
     const { getByText } = render(<DashboardScreen />);
     await waitFor(() => {
-      expect(getByText('WHY')).toBeTruthy();
+      expect(getByText(/No recovery concerns/)).toBeTruthy();
     });
   });
 
-  it('shows TODAY label for plan card', async () => {
+  it('shows Today label for plan card', async () => {
     const planResponse = {
       week: [{
         today: true,
@@ -154,8 +148,8 @@ describe('DashboardScreen', () => {
 
     const { getByText } = render(<DashboardScreen />);
     await waitFor(() => {
-      expect(getByText('TODAY')).toBeTruthy();
-      expect(getByText(/PUSH/)).toBeTruthy();
+      expect(getByText('Today')).toBeTruthy();
+      expect(getByText(/Push/)).toBeTruthy();
     });
   });
 
@@ -183,11 +177,11 @@ describe('DashboardScreen', () => {
 
     const { getByText } = render(<DashboardScreen />);
     await waitFor(() => {
-      expect(getByText('No recovery penalties active.')).toBeTruthy();
+      expect(getByText('Recovery on track.')).toBeTruthy();
     });
   });
 
-  it('renders check-in context in WHY section when check-in has low energy', async () => {
+  it('renders check-in context when check-in has low energy', async () => {
     getLastCheckIn.mockResolvedValue({ energy: 1, sleepQuality: 3, soreness: 3 });
     getCheckInContext.mockReturnValue(['Low energy noted']);
 
